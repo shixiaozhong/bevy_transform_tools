@@ -8,7 +8,7 @@ use bevy::{
 use super::{
     CAMERA_DISTANCE_SCALE, CAMERA_MAX_DISTANCE_SCALE, CAMERA_PITCH, CAMERA_YAW, GRID_HALF_EXTENT,
     ORBIT_INERTIA_DAMPING, ORBIT_SENSITIVITY, ORBIT_VELOCITY_EPSILON,
-    interaction::pointer_is_over_model,
+    interaction::{GizmoDrag, pointer_is_over_model},
     model::{ImportedModel, ModelDrag},
 };
 
@@ -48,11 +48,12 @@ pub(super) fn orbit_camera(
     mut input: OrbitInput,
     camera: Single<(&mut Transform, &mut OrbitCamera), With<Camera3d>>,
     model_drag: Res<ModelDrag>,
+    gizmo_drag: Res<GizmoDrag>,
     mut orbit_drag: ResMut<OrbitDrag>,
     models: Query<&ImportedModel>,
 ) {
     let (mut transform, mut orbit) = camera.into_inner();
-    let is_blocked = model_drag.active.is_some();
+    let is_blocked = model_drag.active.is_some() || gizmo_drag.is_active();
 
     update_orbit_drag_state(
         &input.buttons,

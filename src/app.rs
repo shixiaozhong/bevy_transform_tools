@@ -8,12 +8,17 @@ mod drawing;
 mod interaction;
 mod model;
 mod scene;
+mod tool;
 
 use camera::{OrbitDrag, orbit_camera};
 use drawing::draw_grid_and_selection;
-use interaction::{clear_selection_on_non_model_click, update_model_drag};
+use interaction::{
+    GizmoDrag, begin_move_gizmo_drag, clear_selection_on_non_model_click, update_model_drag,
+    update_move_gizmo_drag,
+};
 use model::{ModelDrag, SelectedModel, apply_model_commands, update_api_state_from_scene};
 use scene::setup_scene;
+use tool::ActiveTool;
 
 pub(super) const GRID_HALF_EXTENT: i32 = 50;
 pub(super) const CAMERA_YAW: f32 = 0.62;
@@ -29,7 +34,9 @@ pub fn run_app() {
         .insert_resource(ClearColor(Color::srgb(0.03, 0.035, 0.045)))
         .insert_resource(SelectedModel::default())
         .insert_resource(ModelDrag::default())
+        .insert_resource(GizmoDrag::default())
         .insert_resource(OrbitDrag::default())
+        .insert_resource(ActiveTool::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Bevy Transform Tools".into(),
@@ -49,6 +56,8 @@ pub fn run_app() {
             Update,
             (
                 apply_model_commands,
+                begin_move_gizmo_drag,
+                update_move_gizmo_drag,
                 update_model_drag,
                 orbit_camera,
                 update_api_state_from_scene,

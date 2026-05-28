@@ -5,7 +5,10 @@ use crate::{
     state::{self, ModelCommand, TransformSnapshot},
 };
 
-use super::interaction::{select_model_on_click, start_model_drag};
+use super::{
+    interaction::{select_model_on_click, start_model_drag},
+    tool::ActiveTool,
+};
 
 #[derive(Component)]
 pub(super) struct ImportedModel {
@@ -33,6 +36,7 @@ pub(super) fn apply_model_commands(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut selected: ResMut<SelectedModel>,
+    mut active_tool: ResMut<ActiveTool>,
     mut models: Query<(Entity, &ImportedModel, &mut Transform)>,
 ) {
     for command in state::drain_commands() {
@@ -58,11 +62,29 @@ pub(super) fn apply_model_commands(
                     }
                 }
             }
+            ModelCommand::CenterOnOrigin(id) => {
+                for (_, model, mut model_transform) in &mut models {
+                    if model.id == id {
+                        center_model_on_origin(model, &mut model_transform);
+                        break;
+                    }
+                }
+            }
+            ModelCommand::DropToBuildPlate(id) => {
+                for (_, model, mut model_transform) in &mut models {
+                    if model.id == id {
+                        drop_model_to_build_plate(model, &mut model_transform);
+                        break;
+                    }
+                }
+            }
+            ModelCommand::SetActiveTool(mode) => active_tool.set_mode(mode),
             ModelCommand::RemoveAll => {
                 for (entity, _, _) in &mut models {
                     commands.entity(entity).despawn();
                 }
                 selected.0 = None;
+                active_tool.set_mode(state::ToolModeSpec::None);
             }
             ModelCommand::Select(id) => {
                 if models.iter_mut().any(|(_, model, _)| model.id == id) {
@@ -129,4 +151,39 @@ pub(super) fn model_visual_center(model: &ImportedModel, transform: &Transform) 
 
 fn center_model_on_platform(transform: &mut Transform, local_center: Vec3) {
     transform.translation -= transform.rotation * (local_center * transform.scale);
+}
+
+fn center_model_on_origin(model: &ImportedModel, transform: &mut Transform) {
+    let center = model_visual_center(model, transform);
+    transform.translation.x -= center.x;
+    transform.translation.z -= center.z;
+}
+
+fn drop_model_to_build_plate(model: &ImportedModel, transform: &mut Transform) {
+    let Some(bounds) = model.bounds else {
+        transform.translation.y = 0.0;
+        return;
+    };
+
+    let min_y = transformed_bounds_min_y(bounds, transform);
+    transform.translation.y -= min_y;
+}
+
+fn transformed_bounds_min_y(bounds: MeshBounds, transform: &Transform) -> f32 {
+    let half = bounds.size * 0.5;
+    let local_corners = [
+        bounds.center + Vec3::new(-half.x, -half.y, -half.z),
+        bounds.center + Vec3::new(half.x, -half.y, -half.z),
+        bounds.center + Vec3::new(half.x, half.y, -half.z),
+        bounds.center + Vec3::new(-half.x, half.y, -half.z),
+        bounds.center + Vec3::new(-half.x, -half.y, half.z),
+        bounds.center + Vec3::new(half.x, -half.y, half.z),
+        bounds.center + Vec3::new(half.x, half.y, half.z),
+        bounds.center + Vec3::new(-half.x, half.y, half.z),
+    ];
+
+    local_corners
+        .into_iter()
+        .map(|corner| transform.transform_point(corner).y)
+        .fold(f32::INFINITY, f32::min)
 }

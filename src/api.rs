@@ -2,8 +2,8 @@ use crate::{
     importers::{load_obj_mesh, load_stl_mesh},
     mesh::MeshData,
     state::{
-        self, ModelCommand, TransformSpec, clear_api_models, push_command, record_error,
-        remember_queued_model_transform, remember_selection,
+        self, ModelCommand, ToolModeSpec, TransformSpec, clear_api_models, push_command,
+        record_error, remember_queued_model_transform, remember_selection,
     },
 };
 
@@ -25,6 +25,22 @@ pub fn select_model(id: u32) {
 pub fn clear_models() {
     push_command(ModelCommand::RemoveAll);
     clear_api_models();
+}
+
+pub fn center_model_on_origin(id: u32) {
+    push_command(ModelCommand::CenterOnOrigin(id));
+}
+
+pub fn drop_model_to_build_plate(id: u32) {
+    push_command(ModelCommand::DropToBuildPlate(id));
+}
+
+pub fn activate_move_tool() {
+    push_command(ModelCommand::SetActiveTool(ToolModeSpec::Move));
+}
+
+pub fn clear_active_tool() {
+    push_command(ModelCommand::SetActiveTool(ToolModeSpec::None));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -93,6 +109,26 @@ mod wasm {
     #[wasm_bindgen]
     pub fn clear_scene_models() {
         clear_models();
+    }
+
+    #[wasm_bindgen]
+    pub fn center_model(id: u32) {
+        center_model_on_origin(id);
+    }
+
+    #[wasm_bindgen]
+    pub fn drop_model_to_platform(id: u32) {
+        drop_model_to_build_plate(id);
+    }
+
+    #[wasm_bindgen]
+    pub fn activate_move_tool_mode() {
+        activate_move_tool();
+    }
+
+    #[wasm_bindgen]
+    pub fn clear_tool_mode() {
+        clear_active_tool();
     }
 
     #[wasm_bindgen]

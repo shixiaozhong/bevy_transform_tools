@@ -21,8 +21,18 @@ pub(crate) enum ModelCommand {
         id: u32,
         transform: TransformSpec,
     },
+    CenterOnOrigin(u32),
+    DropToBuildPlate(u32),
+    SetActiveTool(ToolModeSpec),
     RemoveAll,
     Select(u32),
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum ToolModeSpec {
+    #[default]
+    None,
+    Move,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -129,13 +139,13 @@ pub(crate) fn remember_queued_model_transform(id: u32, transform: Transform) {
 }
 
 pub(crate) fn remember_selection(id: Option<u32>) {
-    API_STATE.with(|state| state.borrow_mut().selected = id);
+    API_STATE.with(|state| update_selected(&mut state.borrow_mut(), id));
 }
 
 pub(crate) fn clear_api_models() {
     API_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        state.selected = None;
+        update_selected(&mut state, None);
         state.transforms.clear();
     });
 }
@@ -146,10 +156,48 @@ pub(crate) fn sync_api_state(
 ) {
     API_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        state.selected = selected;
+        update_selected(&mut state, selected);
         state.transforms.clear();
         state.transforms.extend(transforms);
     });
+}
+
+fn update_selected(state: &mut ApiState, selected: Option<u32>) {
+    if state.selected == selected {
+        return;
+    }
+
+    state.selected = selected;
+    notify_selection_changed(selected);
+}
+
+fn notify_selection_changed(selected: Option<u32>) {
+    let selected_id = selected.unwrap_or(0);
+    dispatch_selection_changed(selected_id);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dispatch_selection_changed(selected_id: u32) {
+    browser_events::dispatch_selection_changed(selected_id);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dispatch_selection_changed(_selected_id: u32) {}
+
+#[cfg(target_arch = "wasm32")]
+mod browser_events {
+    use wasm_bindgen::prelude::*;
+
+    #[wasm_bindgen(
+        inline_js = "export function dispatch_selection_changed(selectedModelId) {
+            window.dispatchEvent(new CustomEvent('bevy-transform-tools:selection-change', {
+                detail: { selectedModelId }
+            }));
+        }"
+    )]
+    extern "C" {
+        pub(super) fn dispatch_selection_changed(selected_model_id: u32);
+    }
 }
 
 pub fn transform_json(id: u32) -> String {

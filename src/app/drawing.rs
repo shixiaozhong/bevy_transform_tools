@@ -4,21 +4,24 @@ use crate::mesh::MeshBounds;
 
 use super::{
     GRID_HALF_EXTENT,
-    model::{ImportedModel, SelectedModel},
+    model::{ImportedModel, SelectedModel, model_visual_center},
+    tool::ActiveTool,
 };
 
 pub(super) fn draw_grid_and_selection(
     selected: Res<SelectedModel>,
+    active_tool: Res<ActiveTool>,
     models: Query<(&ImportedModel, &Transform)>,
     mut gizmos: Gizmos,
 ) {
     draw_ground_grid(&mut gizmos);
-    draw_selected_model_bounds(&mut gizmos, selected.0, &models);
+    draw_selected_model_tools(&mut gizmos, selected.0, active_tool.is_move(), &models);
 }
 
-fn draw_selected_model_bounds(
+fn draw_selected_model_tools(
     gizmos: &mut Gizmos,
     selected_id: Option<u32>,
+    show_move_gizmo: bool,
     models: &Query<(&ImportedModel, &Transform)>,
 ) {
     let Some(selected_id) = selected_id else {
@@ -30,12 +33,28 @@ fn draw_selected_model_bounds(
             continue;
         }
 
-        if let Some(bounds) = model.bounds {
+        if !show_move_gizmo && let Some(bounds) = model.bounds {
             draw_model_aabb(gizmos, bounds, transform);
+        }
+        if show_move_gizmo {
+            draw_move_gizmo(gizmos, model, transform);
         }
 
         break;
     }
+}
+
+fn draw_move_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Transform) {
+    let origin = model_visual_center(model, transform);
+    let length = move_gizmo_length(model, transform);
+    let x_color = Color::srgb(0.95, 0.05, 0.04);
+    let y_color = Color::srgb(0.05, 0.75, 0.12);
+    let z_color = Color::srgb(0.04, 0.16, 0.95);
+
+    gizmos.arrow(origin, origin + Vec3::X * length, x_color);
+    gizmos.arrow(origin, origin + Vec3::Y * length, y_color);
+    gizmos.arrow(origin, origin + Vec3::Z * length, z_color);
+    gizmos.sphere(origin, 0.07 * length, Color::srgb(0.08, 0.52, 0.48));
 }
 
 fn draw_model_aabb(gizmos: &mut Gizmos, bounds: MeshBounds, transform: &Transform) {
@@ -119,3 +138,12 @@ const AABB_EDGES: [(usize, usize); 12] = [
     (2, 6),
     (3, 7),
 ];
+
+fn move_gizmo_length(model: &ImportedModel, transform: &Transform) -> f32 {
+    let scale = transform.scale.abs().max_element().max(1.0);
+    let model_size = model
+        .bounds
+        .map(|bounds| bounds.size.max_element().abs() * scale * 0.7)
+        .unwrap_or(0.0);
+    model_size.max(2.2 * scale)
+}
