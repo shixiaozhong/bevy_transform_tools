@@ -1,4 +1,6 @@
 use bevy::{
+    camera::visibility::RenderLayers,
+    gizmos::prelude::GizmoConfig,
     prelude::*,
     window::{PresentMode, WindowTheme},
 };
@@ -11,7 +13,10 @@ mod scene;
 mod tool;
 
 use camera::{OrbitDrag, orbit_camera};
-use drawing::draw_grid_and_selection;
+use drawing::{
+    OrientationGizmos, OrientationInteraction, draw_grid_and_selection, draw_orientation_overlay,
+    orient_camera_from_cube_click, update_orientation_camera, update_orientation_interaction,
+};
 use interaction::{
     GizmoDrag, begin_move_gizmo_drag, clear_selection_on_non_model_click, update_model_drag,
     update_move_gizmo_drag,
@@ -37,6 +42,14 @@ pub fn run_app() {
         .insert_resource(GizmoDrag::default())
         .insert_resource(OrbitDrag::default())
         .insert_resource(ActiveTool::default())
+        .insert_resource(OrientationInteraction::default())
+        .insert_gizmo_config::<OrientationGizmos>(
+            OrientationGizmos,
+            GizmoConfig {
+                render_layers: RenderLayers::layer(1),
+                ..default()
+            },
+        )
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Bevy Transform Tools".into(),
@@ -51,6 +64,7 @@ pub fn run_app() {
         }))
         .add_plugins(MeshPickingPlugin)
         .add_observer(clear_selection_on_non_model_click)
+        .add_observer(orient_camera_from_cube_click)
         .add_systems(Startup, setup_scene)
         .add_systems(
             Update,
@@ -61,7 +75,10 @@ pub fn run_app() {
                 update_model_drag,
                 orbit_camera,
                 update_api_state_from_scene,
+                update_orientation_interaction,
                 draw_grid_and_selection,
+                update_orientation_camera,
+                draw_orientation_overlay,
             )
                 .chain(),
         )

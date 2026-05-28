@@ -1,8 +1,12 @@
 use bevy::prelude::*;
 
-use super::camera::spawn_orbit_camera;
+use super::{camera::spawn_orbit_camera, drawing::spawn_orientation_overlay};
 
-pub(super) fn setup_scene(mut commands: Commands) {
+pub(super) fn setup_scene(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     commands.spawn((
         DirectionalLight {
             illuminance: 6_000.0,
@@ -22,4 +26,5 @@ pub(super) fn setup_scene(mut commands: Commands) {
     ));
 
     spawn_orbit_camera(&mut commands);
+    spawn_orientation_overlay(&mut commands, &mut meshes, &mut materials);
 }

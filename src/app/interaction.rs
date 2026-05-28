@@ -6,6 +6,8 @@ use bevy::{
 use crate::state::{self, ToolModeSpec};
 
 use super::{
+    camera::OrbitCamera,
+    drawing::{OrientationInteraction, OrientationViewTarget},
     model::{ImportedModel, ModelDrag, ModelDragState, SelectedModel, model_visual_center},
     tool::ActiveTool,
 };
@@ -63,14 +65,18 @@ pub(super) fn select_model_on_click(
 pub(super) fn clear_selection_on_non_model_click(
     click: On<Pointer<Click>>,
     models: Query<&ImportedModel>,
+    orientation_targets: Query<(), With<OrientationViewTarget>>,
     pointer_map: Res<PointerMap>,
     pointer_interactions: Query<&PointerInteraction>,
+    orientation_interaction: Res<OrientationInteraction>,
     mut selected: ResMut<SelectedModel>,
     mut model_drag: ResMut<ModelDrag>,
     mut gizmo_drag: ResMut<GizmoDrag>,
     mut active_tool: ResMut<ActiveTool>,
 ) {
     if click.button != PointerButton::Primary
+        || orientation_targets.contains(click.entity)
+        || orientation_interaction.pointer_over
         || pointer_is_over_model(&models, &pointer_map, &pointer_interactions)
     {
         return;
@@ -88,7 +94,7 @@ pub(super) fn clear_selection_on_non_model_click(
 
 pub(super) fn start_model_drag(
     drag: On<Pointer<DragStart>>,
-    camera: Single<(&Camera, &GlobalTransform), With<Camera3d>>,
+    camera: Single<(&Camera, &GlobalTransform), With<OrbitCamera>>,
     models: Query<(&ImportedModel, &Transform)>,
     active_tool: Res<ActiveTool>,
     mut model_drag: ResMut<ModelDrag>,
@@ -125,7 +131,7 @@ pub(super) fn start_model_drag(
 pub(super) fn begin_move_gizmo_drag(
     buttons: Res<ButtonInput<MouseButton>>,
     window: Single<&Window>,
-    camera: Single<(&Camera, &GlobalTransform), With<Camera3d>>,
+    camera: Single<(&Camera, &GlobalTransform), With<OrbitCamera>>,
     selected: Res<SelectedModel>,
     active_tool: Res<ActiveTool>,
     models: Query<(&ImportedModel, &Transform)>,
@@ -203,7 +209,7 @@ pub(super) fn update_move_gizmo_drag(
 pub(super) fn update_model_drag(
     buttons: Res<ButtonInput<MouseButton>>,
     window: Single<&Window>,
-    camera: Single<(&Camera, &GlobalTransform), With<Camera3d>>,
+    camera: Single<(&Camera, &GlobalTransform), With<OrbitCamera>>,
     gizmo_drag: Res<GizmoDrag>,
     mut model_drag: ResMut<ModelDrag>,
     mut models: Query<(&ImportedModel, &mut Transform)>,

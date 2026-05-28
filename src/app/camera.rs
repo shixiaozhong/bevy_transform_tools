@@ -46,7 +46,7 @@ pub(super) fn spawn_orbit_camera(commands: &mut Commands) {
 pub(super) fn orbit_camera(
     time: Res<Time>,
     mut input: OrbitInput,
-    camera: Single<(&mut Transform, &mut OrbitCamera), With<Camera3d>>,
+    camera: Single<(&mut Transform, &mut OrbitCamera), With<OrbitCamera>>,
     model_drag: Res<ModelDrag>,
     gizmo_drag: Res<GizmoDrag>,
     mut orbit_drag: ResMut<OrbitDrag>,
@@ -151,6 +151,17 @@ fn update_orbit_zoom(mouse_wheel: &mut MessageReader<MouseWheel>, orbit: &mut Or
 fn stop_orbit_inertia(orbit: &mut OrbitCamera) {
     orbit.yaw_velocity = 0.0;
     orbit.pitch_velocity = 0.0;
+}
+
+pub(super) fn set_orbit_view_direction(orbit: &mut OrbitCamera, direction: Vec3) {
+    let direction = direction.normalize_or_zero();
+    if direction.length_squared() < f32::EPSILON {
+        return;
+    }
+
+    orbit.yaw = direction.x.atan2(direction.z);
+    orbit.pitch = clamp_pitch(direction.y.asin());
+    stop_orbit_inertia(orbit);
 }
 
 fn default_orbit_camera() -> OrbitCamera {
