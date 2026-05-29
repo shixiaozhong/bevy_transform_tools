@@ -3,6 +3,7 @@ use bevy::{
     input::mouse::{AccumulatedMouseMotion, MouseWheel},
     picking::pointer::{PointerInteraction, PointerMap},
     prelude::*,
+    ui::IsDefaultUiCamera,
 };
 
 use super::{
@@ -15,6 +16,23 @@ use super::{
 #[derive(Resource, Default)]
 pub(super) struct OrbitDrag {
     active: bool,
+    suppress_clear_click_frames: u8,
+}
+
+impl OrbitDrag {
+    pub(super) fn take_suppressed_clear_click(&mut self) -> bool {
+        let suppress = self.suppress_clear_click_frames > 0;
+        self.suppress_clear_click_frames = 0;
+        suppress
+    }
+
+    fn suppress_next_clear_click(&mut self) {
+        self.suppress_clear_click_frames = 2;
+    }
+
+    fn decay_clear_click_suppression(&mut self) {
+        self.suppress_clear_click_frames = self.suppress_clear_click_frames.saturating_sub(1);
+    }
 }
 
 #[derive(Component)]
@@ -40,7 +58,12 @@ pub(super) fn spawn_orbit_camera(commands: &mut Commands) {
     let orbit = default_orbit_camera();
     let mut camera_transform = Transform::default();
     apply_orbit_transform(&mut camera_transform, &orbit);
-    commands.spawn((Camera3d::default(), camera_transform, orbit));
+    commands.spawn((
+        Camera3d::default(),
+        camera_transform,
+        orbit,
+        IsDefaultUiCamera,
+    ));
 }
 
 pub(super) fn orbit_camera(
@@ -70,8 +93,9 @@ pub(super) fn orbit_camera(
         is_blocked,
         orbit_drag.active,
         &mut orbit,
+        &mut orbit_drag,
     );
-    update_orbit_zoom(&mut input.mouse_wheel, &mut orbit);
+    update_orbit_zoom(&mut input.mouse_wheel, &mut orbit, &mut orbit_drag);
     apply_orbit_transform(&mut transform, &orbit);
 }
 
@@ -100,12 +124,17 @@ fn update_orbit_rotation(
     is_blocked: bool,
     orbit_drag_active: bool,
     orbit: &mut OrbitCamera,
+    orbit_drag: &mut OrbitDrag,
 ) {
     if is_blocked {
         stop_orbit_inertia(orbit);
     } else if buttons.pressed(MouseButton::Left) && orbit_drag_active {
         apply_orbit_input(orbit, mouse_delta, delta_secs);
+        if mouse_delta.length_squared() > 0.0 {
+            orbit_drag.suppress_next_clear_click();
+        }
     } else {
+        orbit_drag.decay_clear_click_suppression();
         apply_orbit_inertia(orbit, delta_secs);
     }
 }
@@ -142,9 +171,14 @@ fn apply_orbit_inertia(orbit: &mut OrbitCamera, delta_secs: f32) {
     orbit.pitch_velocity *= decay;
 }
 
-fn update_orbit_zoom(mouse_wheel: &mut MessageReader<MouseWheel>, orbit: &mut OrbitCamera) {
+fn update_orbit_zoom(
+    mouse_wheel: &mut MessageReader<MouseWheel>,
+    orbit: &mut OrbitCamera,
+    orbit_drag: &mut OrbitDrag,
+) {
     for wheel in mouse_wheel.read() {
         orbit.distance = (orbit.distance - wheel.y * 0.35).clamp(1.0, max_camera_distance());
+        orbit_drag.suppress_next_clear_click();
     }
 }
 

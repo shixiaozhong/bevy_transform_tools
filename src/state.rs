@@ -33,6 +33,7 @@ pub(crate) enum ToolModeSpec {
     #[default]
     None,
     Move,
+    Rotate,
 }
 
 #[derive(Clone, Copy, Debug)]

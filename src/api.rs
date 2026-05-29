@@ -39,6 +39,10 @@ pub fn activate_move_tool() {
     push_command(ModelCommand::SetActiveTool(ToolModeSpec::Move));
 }
 
+pub fn activate_rotate_tool() {
+    push_command(ModelCommand::SetActiveTool(ToolModeSpec::Rotate));
+}
+
 pub fn clear_active_tool() {
     push_command(ModelCommand::SetActiveTool(ToolModeSpec::None));
 }
@@ -124,6 +128,11 @@ mod wasm {
     #[wasm_bindgen]
     pub fn activate_move_tool_mode() {
         activate_move_tool();
+    }
+
+    #[wasm_bindgen]
+    pub fn activate_rotate_tool_mode() {
+        activate_rotate_tool();
     }
 
     #[wasm_bindgen]

@@ -227,6 +227,7 @@
           <span class="tool-label">缩放</span>
         </button>
         <button
+          id="rotate-tool"
           class="tool-button"
           type="button"
           title="旋转"
@@ -319,6 +320,7 @@
     <script type="module">
       import init, {
         activate_move_tool_mode,
+        activate_rotate_tool_mode,
         center_model,
         clear_tool_mode,
         drop_model_to_platform,
@@ -347,12 +349,13 @@
       const fileInput = document.querySelector("#model-file");
       const importButton = document.querySelector("#import-model");
       const moveButton = document.querySelector("#move-tool");
+      const rotateButton = document.querySelector("#rotate-tool");
       const centerButton = document.querySelector("#center-model");
       const dropButton = document.querySelector("#drop-model");
       const selectionTools = document.querySelectorAll(
         "[data-requires-selection]",
       );
-      let moveToolActive = false;
+      let activeTool = null;
 
       importButton.addEventListener("click", () => {
         fileInput.click();
@@ -377,14 +380,26 @@
           return;
         }
 
-        if (moveToolActive) {
+        if (activeTool === "move") {
           clear_tool_mode();
-          moveToolActive = false;
-          moveButton.classList.remove("is-active");
+          setActiveToolButton(null);
         } else {
           activate_move_tool_mode();
-          moveToolActive = true;
-          moveButton.classList.add("is-active");
+          setActiveToolButton("move");
+        }
+      });
+
+      rotateButton.addEventListener("click", () => {
+        if (selectedModelId === 0) {
+          return;
+        }
+
+        if (activeTool === "rotate") {
+          clear_tool_mode();
+          setActiveToolButton(null);
+        } else {
+          activate_rotate_tool_mode();
+          setActiveToolButton("rotate");
         }
       });
 
@@ -406,9 +421,13 @@
           button.disabled = !hasSelection;
         }
         if (!hasSelection) {
-          moveToolActive = false;
-          moveButton.classList.remove("is-active");
+          setActiveToolButton(null);
         }
+      };
+      const setActiveToolButton = (tool) => {
+        activeTool = tool;
+        moveButton.classList.toggle("is-active", tool === "move");
+        rotateButton.classList.toggle("is-active", tool === "rotate");
       };
       let selectedModelId = 0;
 

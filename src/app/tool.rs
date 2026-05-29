@@ -7,6 +7,7 @@ pub(super) enum ToolMode {
     #[default]
     None,
     Move,
+    Rotate,
 }
 
 #[derive(Resource, Default)]
@@ -19,10 +20,15 @@ impl ActiveTool {
         self.mode = match mode {
             ToolModeSpec::None => ToolMode::None,
             ToolModeSpec::Move => ToolMode::Move,
+            ToolModeSpec::Rotate => ToolMode::Rotate,
         };
     }
 
     pub(super) fn is_move(&self) -> bool {
         self.mode == ToolMode::Move
+    }
+
+    pub(super) fn is_rotate(&self) -> bool {
+        self.mode == ToolMode::Rotate
     }
 }

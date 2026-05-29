@@ -10,6 +10,7 @@ use crate::mesh::MeshBounds;
 use super::{
     GRID_HALF_EXTENT,
     camera::{OrbitCamera, set_orbit_view_direction, sync_orbit_transform},
+    interaction::{GizmoDrag, RotateGizmoHover},
     model::{ImportedModel, SelectedModel, model_visual_center},
     tool::ActiveTool,
 };
@@ -27,6 +28,7 @@ const ORIENTATION_AXIS_LABEL_SIZE: f32 = 0.22;
 const ORIENTATION_LABEL_TEXTURE_SIZE: u32 = 128;
 const ORIENTATION_LABEL_GLYPH_SCALE: u32 = 11;
 const ORIENTATION_LABEL_GLYPH_SPACING: u32 = 6;
+const ROTATION_ANGLE_LABEL_OFFSET: Vec2 = Vec2::new(12.0, 10.0);
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub(super) struct OrientationGizmos;
@@ -48,6 +50,12 @@ pub(super) struct OrientationBlockShape {
 pub(super) struct OrientationAxisLabel {
     axis: Vec3,
 }
+
+#[derive(Component)]
+pub(super) struct RotationAngleLabel;
+
+#[derive(Component)]
+pub(super) struct RotationAngleText;
 
 #[derive(Resource, Default)]
 pub(super) struct OrientationInteraction {
@@ -79,6 +87,29 @@ pub(super) fn spawn_orientation_overlay(
     spawn_orientation_light(commands);
     spawn_orientation_cube_blocks(commands, meshes, materials, asset_server);
     spawn_orientation_axis_labels(commands, meshes, materials, images);
+    spawn_rotation_angle_label(commands);
+}
+
+fn spawn_rotation_angle_label(commands: &mut Commands) {
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            display: Display::None,
+            padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.06, 0.06, 0.07, 0.88)),
+        RotationAngleLabel,
+        children![(
+            Text::new("X: 0.00"),
+            TextFont {
+                font_size: 15.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.95, 0.95, 0.94)),
+            RotationAngleText,
+        )],
+    ));
 }
 
 fn spawn_orientation_cameras(commands: &mut Commands) {
@@ -241,11 +272,88 @@ fn spawn_orientation_axis_labels(
 pub(super) fn draw_grid_and_selection(
     selected: Res<SelectedModel>,
     active_tool: Res<ActiveTool>,
+    gizmo_drag: Res<GizmoDrag>,
+    rotate_hover: Res<RotateGizmoHover>,
     models: Query<(&ImportedModel, &Transform)>,
     mut gizmos: Gizmos,
 ) {
     draw_ground_grid(&mut gizmos);
-    draw_selected_model_tools(&mut gizmos, selected.0, active_tool.is_move(), &models);
+    draw_selected_model_tools(
+        &mut gizmos,
+        selected.0,
+        &active_tool,
+        &gizmo_drag,
+        &rotate_hover,
+        &models,
+    );
+}
+
+pub(super) fn update_rotation_angle_label(
+    selected: Res<SelectedModel>,
+    active_tool: Res<ActiveTool>,
+    gizmo_drag: Res<GizmoDrag>,
+    rotate_hover: Res<RotateGizmoHover>,
+    camera: Single<(&Camera, &GlobalTransform), With<OrbitCamera>>,
+    models: Query<(&ImportedModel, &Transform)>,
+    mut label: Single<&mut Node, With<RotationAngleLabel>>,
+    mut text: Single<&mut Text, With<RotationAngleText>>,
+) {
+    let Some((axis, angle)) = rotation_angle_label_state(&gizmo_drag, &rotate_hover) else {
+        label.display = Display::None;
+        return;
+    };
+
+    if !active_tool.is_rotate() {
+        label.display = Display::None;
+        return;
+    }
+
+    let Some(selected_id) = selected.0 else {
+        label.display = Display::None;
+        return;
+    };
+
+    let (camera, camera_transform) = *camera;
+    for (model, transform) in &models {
+        if model.id != selected_id {
+            continue;
+        }
+
+        let origin = model_visual_center(model, transform);
+        let radius = rotate_gizmo_radius(model, transform);
+        let Some(print_axis) = world_axis_to_rotation_print_axis(axis) else {
+            label.display = Display::None;
+            return;
+        };
+        let handle_position =
+            origin + print_axis_to_world(rotation_handle_radial(print_axis)) * radius;
+        let Ok(screen_position) = camera.world_to_viewport(camera_transform, handle_position)
+        else {
+            label.display = Display::None;
+            return;
+        };
+
+        label.display = Display::Flex;
+        label.left = Val::Px(screen_position.x + ROTATION_ANGLE_LABEL_OFFSET.x);
+        label.top = Val::Px(screen_position.y + ROTATION_ANGLE_LABEL_OFFSET.y);
+        text.0 = format!(
+            "{}: {:.2}",
+            rotation_axis_label(print_axis),
+            normalized_degrees(angle)
+        );
+        return;
+    }
+
+    label.display = Display::None;
+}
+
+fn rotation_angle_label_state(
+    gizmo_drag: &GizmoDrag,
+    rotate_hover: &RotateGizmoHover,
+) -> Option<(Vec3, f32)> {
+    gizmo_drag
+        .active_rotation()
+        .or_else(|| rotate_hover.axis.map(|axis| (axis, rotate_hover.angle)))
 }
 
 pub(super) fn draw_orientation_overlay(
@@ -420,7 +528,9 @@ fn ray_orientation_block_distance(ray: &Ray3d, direction: Vec3) -> Option<f32> {
 fn draw_selected_model_tools(
     gizmos: &mut Gizmos,
     selected_id: Option<u32>,
-    show_move_gizmo: bool,
+    active_tool: &ActiveTool,
+    gizmo_drag: &GizmoDrag,
+    rotate_hover: &RotateGizmoHover,
     models: &Query<(&ImportedModel, &Transform)>,
 ) {
     let Some(selected_id) = selected_id else {
@@ -432,11 +542,23 @@ fn draw_selected_model_tools(
             continue;
         }
 
-        if !show_move_gizmo && let Some(bounds) = model.bounds {
+        if !active_tool.is_move()
+            && !active_tool.is_rotate()
+            && let Some(bounds) = model.bounds
+        {
             draw_model_aabb(gizmos, bounds, transform);
         }
-        if show_move_gizmo {
+        if active_tool.is_move() {
             draw_move_gizmo(gizmos, model, transform);
+        }
+        if active_tool.is_rotate() {
+            draw_rotate_gizmo(
+                gizmos,
+                model,
+                transform,
+                gizmo_drag.active_rotation(),
+                rotate_hover.axis,
+            );
         }
 
         break;
@@ -454,6 +576,136 @@ fn draw_move_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Trans
     gizmos.arrow(origin, origin + Vec3::Y * length, y_color);
     gizmos.arrow(origin, origin + Vec3::Z * length, z_color);
     gizmos.sphere(origin, 0.07 * length, Color::srgb(0.08, 0.52, 0.48));
+}
+
+fn draw_rotate_gizmo(
+    gizmos: &mut Gizmos,
+    model: &ImportedModel,
+    transform: &Transform,
+    active_rotation: Option<(Vec3, f32)>,
+    hovered_axis: Option<Vec3>,
+) {
+    let origin = model_visual_center(model, transform);
+    let radius = rotate_gizmo_radius(model, transform);
+    let focused_axis = active_rotation.map(|(axis, _)| axis).or(hovered_axis);
+    let axes = [
+        (Vec3::X, Color::srgb(0.95, 0.05, 0.04)),
+        (Vec3::Y, Color::srgb(0.05, 0.78, 0.12)),
+        (Vec3::Z, Color::srgb(0.04, 0.16, 0.95)),
+    ];
+
+    for (print_axis, color) in axes {
+        let world_axis = print_axis_to_world(print_axis);
+        if focused_axis.is_some_and(|axis| axis != world_axis) {
+            continue;
+        }
+
+        let is_active = active_rotation.is_some_and(|(active_axis, _)| active_axis == world_axis);
+        let is_hovered = hovered_axis == Some(world_axis);
+        let ring_color = if is_active {
+            Color::srgb(0.96, 0.96, 0.92)
+        } else {
+            color
+        };
+        gizmos
+            .circle(
+                Isometry3d::new(origin, Quat::from_rotation_arc(Vec3::Z, world_axis)),
+                radius,
+                ring_color,
+            )
+            .resolution(128);
+        draw_rotation_axis_handle(gizmos, origin, print_axis, radius, color);
+
+        if is_active || is_hovered {
+            let angle = active_rotation
+                .filter(|(axis, _)| *axis == world_axis)
+                .map(|(_, angle)| angle)
+                .unwrap_or(0.0);
+            draw_rotation_ticks(gizmos, origin, print_axis, radius, angle);
+        }
+    }
+
+    gizmos.sphere(origin, 0.045 * radius, Color::srgb(0.08, 0.52, 0.48));
+}
+
+fn draw_rotation_axis_handle(
+    gizmos: &mut Gizmos,
+    origin: Vec3,
+    print_axis: Vec3,
+    radius: f32,
+    color: Color,
+) {
+    let axis = print_axis_to_world(print_axis);
+    let radial = print_axis_to_world(rotation_handle_radial(print_axis));
+    let tangent = axis.cross(radial).normalize_or_zero();
+    if tangent.length_squared() < f32::EPSILON {
+        return;
+    }
+
+    let center = origin + radial * radius;
+    let half_length = radius * 0.13;
+    let tip_length = radius * 0.065;
+    let start = center - tangent * half_length;
+    let end = center + tangent * half_length;
+
+    gizmos
+        .arrow(start, end, color)
+        .with_double_end()
+        .with_tip_length(tip_length);
+
+    let grip_half = radius * 0.045;
+    let grip_width = radius * 0.055;
+    let side = radial.cross(tangent).normalize_or_zero();
+    let corners = [
+        center - tangent * grip_half - side * grip_width,
+        center + tangent * grip_half - side * grip_width,
+        center + tangent * grip_half + side * grip_width,
+        center - tangent * grip_half + side * grip_width,
+    ];
+    for index in 0..4 {
+        gizmos.line(corners[index], corners[(index + 1) % 4], color);
+    }
+}
+
+fn rotation_handle_radial(axis: Vec3) -> Vec3 {
+    if axis == Vec3::X {
+        Vec3::NEG_Y
+    } else if axis == Vec3::Y {
+        Vec3::Z
+    } else {
+        Vec3::X
+    }
+}
+
+fn draw_rotation_ticks(
+    gizmos: &mut Gizmos,
+    origin: Vec3,
+    print_axis: Vec3,
+    radius: f32,
+    angle_delta: f32,
+) {
+    let axis = print_axis_to_world(print_axis);
+    let u = print_axis_to_world(rotation_handle_radial(print_axis));
+    let v = axis.cross(u).normalize_or_zero();
+    let color = Color::srgb(0.96, 0.96, 0.92);
+    let tick_count = 72;
+
+    for index in 0..tick_count {
+        let angle = index as f32 / tick_count as f32 * std::f32::consts::TAU;
+        let direction = u * angle.cos() + v * angle.sin();
+        let is_major = index % 6 == 0;
+        let length = if is_major { 0.12 } else { 0.065 } * radius;
+        gizmos.line(
+            origin + direction * (radius - length),
+            origin + direction * (radius + length * 0.35),
+            color,
+        );
+    }
+
+    let reference = u;
+    let current = u * angle_delta.cos() + v * angle_delta.sin();
+    gizmos.line(origin, origin + reference * radius, color);
+    gizmos.line(origin, origin + current * radius, color);
 }
 
 fn draw_model_aabb(gizmos: &mut Gizmos, bounds: MeshBounds, transform: &Transform) {
@@ -906,4 +1158,34 @@ fn move_gizmo_length(model: &ImportedModel, transform: &Transform) -> f32 {
         .map(|bounds| bounds.size.max_element().abs() * scale * 0.7)
         .unwrap_or(0.0);
     model_size.max(2.2 * scale)
+}
+
+fn rotate_gizmo_radius(model: &ImportedModel, transform: &Transform) -> f32 {
+    move_gizmo_length(model, transform) * 0.86
+}
+
+fn world_axis_to_rotation_print_axis(axis: Vec3) -> Option<Vec3> {
+    if axis.abs_diff_eq(print_axis_to_world(Vec3::X), f32::EPSILON) {
+        Some(Vec3::X)
+    } else if axis.abs_diff_eq(print_axis_to_world(Vec3::Y), f32::EPSILON) {
+        Some(Vec3::Y)
+    } else if axis.abs_diff_eq(print_axis_to_world(Vec3::Z), f32::EPSILON) {
+        Some(Vec3::Z)
+    } else {
+        None
+    }
+}
+
+fn rotation_axis_label(axis: Vec3) -> &'static str {
+    if axis == Vec3::X {
+        "X"
+    } else if axis == Vec3::Y {
+        "Y"
+    } else {
+        "Z"
+    }
+}
+
+fn normalized_degrees(angle: f32) -> f32 {
+    angle.to_degrees().rem_euclid(360.0)
 }
