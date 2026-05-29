@@ -1,14 +1,15 @@
 use bevy::{
+    asset::RenderAssetUsages,
     camera::{ScalingMode, Viewport, visibility::RenderLayers},
-    picking::pointer::{PointerId, PointerInteraction, PointerMap},
     prelude::*,
+    render::render_resource::{Extent3d, PrimitiveTopology, TextureDimension, TextureFormat},
 };
 
 use crate::mesh::MeshBounds;
 
 use super::{
     GRID_HALF_EXTENT,
-    camera::{OrbitCamera, set_orbit_view_direction},
+    camera::{OrbitCamera, set_orbit_view_direction, sync_orbit_transform},
     model::{ImportedModel, SelectedModel, model_visual_center},
     tool::ActiveTool,
 };
@@ -17,21 +18,18 @@ const ORIENTATION_MARGIN: f32 = 32.0;
 const ORIENTATION_VIEWPORT_SIZE: f32 = 196.0;
 const ORIENTATION_VIEW_HEIGHT: f32 = 2.58;
 const ORIENTATION_CAMERA_DISTANCE: f32 = 4.0;
-const ORIENTATION_AXIS_LENGTH: f32 = 1.12;
-const ORIENTATION_LABEL_OFFSET: f32 = 18.0;
-const ORIENTATION_CUBE_SIZE: f32 = ORIENTATION_VIEWPORT_SIZE / ORIENTATION_VIEW_HEIGHT;
+const ORIENTATION_AXIS_LENGTH: f32 = 1.18;
 const ORIENTATION_SCENE_LAYER: usize = 1;
-const ORIENTATION_LABEL_LAYER: usize = 2;
 const ORIENTATION_EDGE_BLOCK_WIDTH: f32 = 0.24;
-const ORIENTATION_CENTER_BLOCK_LENGTH: f32 = 1.0 - ORIENTATION_EDGE_BLOCK_WIDTH * 2.0;
+const ORIENTATION_FACE_INSET: f32 = 0.5 - ORIENTATION_EDGE_BLOCK_WIDTH;
+const ORIENTATION_AXIS_LABEL_OFFSET: f32 = 0.18;
+const ORIENTATION_AXIS_LABEL_SIZE: f32 = 0.22;
+const ORIENTATION_LABEL_TEXTURE_SIZE: u32 = 128;
+const ORIENTATION_LABEL_GLYPH_SCALE: u32 = 11;
+const ORIENTATION_LABEL_GLYPH_SPACING: u32 = 6;
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub(super) struct OrientationGizmos;
-
-#[derive(Component)]
-pub(super) struct OrientationAxisLabel {
-    axis: Vec3,
-}
 
 #[derive(Component)]
 pub(super) struct OrientationCamera;
@@ -41,13 +39,23 @@ pub(super) struct OrientationViewTarget {
     direction: Vec3,
 }
 
+#[derive(Component)]
+pub(super) struct OrientationBlockShape {
+    direction: Vec3,
+}
+
+#[derive(Component)]
+pub(super) struct OrientationAxisLabel {
+    axis: Vec3,
+}
+
 #[derive(Resource, Default)]
 pub(super) struct OrientationInteraction {
-    hovered_entity: Option<Entity>,
+    pub(super) hovered_entity: Option<Entity>,
     pub(super) pointer_over: bool,
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub(super) struct OrientationBlockMaterials {
     base: Handle<StandardMaterial>,
     hover: Handle<StandardMaterial>,
@@ -64,16 +72,13 @@ pub(super) fn spawn_orientation_overlay(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    asset_server: &AssetServer,
 ) {
     spawn_orientation_cameras(commands);
     spawn_orientation_light(commands);
-
-    let block_materials = orientation_block_materials(materials);
-    let base_material = block_materials.base.clone();
-    commands.insert_resource(block_materials);
-
-    spawn_orientation_cube_blocks(commands, meshes, &base_material);
-    spawn_orientation_axis_labels(commands);
+    spawn_orientation_cube_blocks(commands, meshes, materials, asset_server);
+    spawn_orientation_axis_labels(commands, meshes, materials, images);
 }
 
 fn spawn_orientation_cameras(commands: &mut Commands) {
@@ -95,17 +100,6 @@ fn spawn_orientation_cameras(commands: &mut Commands) {
         OrientationCamera,
         Name::new("Orientation 3D Camera"),
     ));
-
-    commands.spawn((
-        Camera2d,
-        Camera {
-            order: 11,
-            clear_color: ClearColorConfig::None,
-            ..default()
-        },
-        RenderLayers::layer(ORIENTATION_LABEL_LAYER),
-        Name::new("Orientation Label Camera"),
-    ));
 }
 
 fn spawn_orientation_light(commands: &mut Commands) {
@@ -121,19 +115,51 @@ fn spawn_orientation_light(commands: &mut Commands) {
     ));
 }
 
-fn orientation_block_materials(
+fn plain_orientation_block_materials(
     materials: &mut Assets<StandardMaterial>,
 ) -> OrientationBlockMaterials {
     let base = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.42, 0.44, 0.45),
+        base_color: Color::srgb(0.74, 0.75, 0.76),
         perceptual_roughness: 0.92,
+        metallic: 0.0,
         unlit: true,
+        cull_mode: None,
         ..default()
     });
     let hover = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.92, 0.48, 0.16),
+        base_color: Color::srgb(0.90, 0.58, 0.32),
         perceptual_roughness: 0.86,
+        metallic: 0.0,
         unlit: true,
+        cull_mode: None,
+        ..default()
+    });
+
+    OrientationBlockMaterials { base, hover }
+}
+
+fn labeled_orientation_block_materials(
+    base_texture_path: &'static str,
+    hover_texture_path: &'static str,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+) -> OrientationBlockMaterials {
+    let base_texture = asset_server.load(base_texture_path);
+    let hover_texture = asset_server.load(hover_texture_path);
+    let base = materials.add(StandardMaterial {
+        base_color_texture: Some(base_texture),
+        perceptual_roughness: 0.92,
+        metallic: 0.0,
+        unlit: true,
+        cull_mode: None,
+        ..default()
+    });
+    let hover = materials.add(StandardMaterial {
+        base_color_texture: Some(hover_texture),
+        perceptual_roughness: 0.86,
+        metallic: 0.0,
+        unlit: true,
+        cull_mode: None,
         ..default()
     });
 
@@ -143,45 +169,71 @@ fn orientation_block_materials(
 fn spawn_orientation_cube_blocks(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    base_material: &Handle<StandardMaterial>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
 ) {
     for block in orientation_cube_blocks() {
+        let block_materials = orientation_block_materials(&block, materials, asset_server);
+        let base_material = block_materials.base.clone();
         commands
             .spawn((
-                Mesh3d(meshes.add(Cuboid::new(block.size.x, block.size.z, block.size.y))),
-                MeshMaterial3d(base_material.clone()),
-                Transform {
-                    translation: print_axis_to_world(block.center),
-                    ..default()
-                },
+                Mesh3d(meshes.add(orientation_block_mesh(&block))),
+                MeshMaterial3d(base_material),
+                Transform::default(),
                 RenderLayers::layer(ORIENTATION_SCENE_LAYER),
                 OrientationViewTarget {
-                    direction: print_axis_to_world(block.direction),
+                    direction: print_axis_to_world(block.direction.normalize()),
                 },
+                OrientationBlockShape {
+                    direction: block.direction,
+                },
+                block_materials,
                 Name::new(format!("Orientation {} View Block", block.name)),
             ))
             .insert(Pickable::default());
     }
 }
 
-fn spawn_orientation_axis_labels(commands: &mut Commands) {
-    for (name, axis, color) in [
-        ("X", Vec3::X, Color::srgb(0.95, 0.05, 0.04)),
-        ("Y", Vec3::Y, Color::srgb(0.05, 0.75, 0.12)),
-        ("Z", Vec3::Z, Color::srgb(0.10, 0.18, 1.00)),
+fn orientation_block_materials(
+    block: &OrientationBlockSeed,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+) -> OrientationBlockMaterials {
+    if block.kind == OrientationBlockKind::Face {
+        let (base_path, hover_path) = orientation_face_texture_paths(block.direction);
+        labeled_orientation_block_materials(base_path, hover_path, materials, asset_server)
+    } else {
+        plain_orientation_block_materials(materials)
+    }
+}
+
+fn spawn_orientation_axis_labels(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+) {
+    for (label, axis, color) in [
+        ("x", Vec3::X, [204, 105, 105, 255]),
+        ("y", Vec3::Y, [111, 194, 119, 255]),
+        ("z", Vec3::Z, [123, 130, 204, 255]),
     ] {
+        let texture = images.add(orientation_label_texture(label, color, [0, 0, 0, 0]));
+        let material = materials.add(StandardMaterial {
+            base_color_texture: Some(texture),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            cull_mode: None,
+            ..default()
+        });
+
         commands.spawn((
-            Text2d::new(name),
-            TextFont {
-                font_size: 22.0,
-                ..default()
-            },
-            TextColor(color),
-            TextLayout::new_with_justify(Justify::Center),
-            Transform::from_translation(Vec3::ZERO),
-            RenderLayers::layer(ORIENTATION_LABEL_LAYER),
+            Mesh3d(meshes.add(orientation_axis_label_mesh())),
+            MeshMaterial3d(material),
+            Transform::default(),
+            RenderLayers::layer(ORIENTATION_SCENE_LAYER),
             OrientationAxisLabel { axis },
-            Name::new(format!("Orientation {name} Label")),
+            Name::new(format!("Orientation {label} Axis Label")),
         ));
     }
 }
@@ -197,12 +249,12 @@ pub(super) fn draw_grid_and_selection(
 }
 
 pub(super) fn draw_orientation_overlay(
-    window: Single<&Window>,
-    camera: Single<&GlobalTransform, With<OrbitCamera>>,
+    orientation_camera: Single<&GlobalTransform, With<OrientationCamera>>,
     mut axis_labels: Query<(&OrientationAxisLabel, &mut Transform)>,
     mut orientation_gizmos: Gizmos<OrientationGizmos>,
 ) {
-    draw_orientation_axes(&mut orientation_gizmos, &window, *camera, &mut axis_labels);
+    update_orientation_axis_label_transforms(*orientation_camera, &mut axis_labels);
+    draw_orientation_axes(&mut orientation_gizmos);
 }
 
 pub(super) fn update_orientation_camera(
@@ -231,33 +283,35 @@ pub(super) fn update_orientation_camera(
 pub(super) fn orient_camera_from_cube_click(
     click: On<Pointer<Click>>,
     targets: Query<&OrientationViewTarget>,
-    orbit: Single<&mut OrbitCamera>,
+    interaction: Res<OrientationInteraction>,
+    camera: Single<(&mut Transform, &mut OrbitCamera), With<OrbitCamera>>,
 ) {
     if click.button != PointerButton::Primary {
         return;
     }
 
-    let Ok(target) = targets.get(click.entity) else {
+    let target_entity = interaction.hovered_entity.unwrap_or(click.entity);
+    let Ok(target) = targets.get(target_entity) else {
         return;
     };
 
-    let mut orbit = orbit.into_inner();
+    let (mut transform, mut orbit) = camera.into_inner();
     set_orbit_view_direction(&mut orbit, target.direction);
+    sync_orbit_transform(&mut transform, &orbit);
 }
 
 pub(super) fn update_orientation_interaction(
-    materials: Res<OrientationBlockMaterials>,
-    pointer_map: Res<PointerMap>,
-    pointer_interactions: Query<&PointerInteraction>,
+    window: Single<&Window>,
+    orientation_camera: Single<(&Camera, &GlobalTransform), With<OrientationCamera>>,
     mut interaction: ResMut<OrientationInteraction>,
     mut blocks: Query<(
         Entity,
-        &OrientationViewTarget,
+        &OrientationBlockShape,
+        &OrientationBlockMaterials,
         &mut MeshMaterial3d<StandardMaterial>,
     )>,
 ) {
-    let hovered = pointer_hovered_orientation_block(&pointer_map, &pointer_interactions, &blocks);
-    let hovered_entity = hovered.map(|(entity, _)| entity);
+    let hovered_entity = cursor_hovered_orientation_block(&window, *orientation_camera, &blocks);
 
     if interaction.hovered_entity == hovered_entity {
         return;
@@ -266,30 +320,101 @@ pub(super) fn update_orientation_interaction(
     interaction.hovered_entity = hovered_entity;
     interaction.pointer_over = hovered_entity.is_some();
 
-    for (entity, _, mut material) in &mut blocks {
+    for (entity, _, block_materials, mut material) in &mut blocks {
         material.0 = if Some(entity) == hovered_entity {
-            materials.hover.clone()
+            block_materials.hover.clone()
         } else {
-            materials.base.clone()
+            block_materials.base.clone()
         };
     }
 }
 
-fn pointer_hovered_orientation_block(
-    pointer_map: &PointerMap,
-    pointer_interactions: &Query<&PointerInteraction>,
+fn cursor_hovered_orientation_block(
+    window: &Window,
+    (camera, camera_transform): (&Camera, &GlobalTransform),
     blocks: &Query<(
         Entity,
-        &OrientationViewTarget,
+        &OrientationBlockShape,
+        &OrientationBlockMaterials,
         &mut MeshMaterial3d<StandardMaterial>,
     )>,
-) -> Option<(Entity, Vec3)> {
-    pointer_map
-        .get_entity(PointerId::Mouse)
-        .and_then(|entity| pointer_interactions.get(entity).ok())
-        .and_then(PointerInteraction::get_nearest_hit)
-        .and_then(|(entity, _)| blocks.get(*entity).ok())
-        .map(|(entity, target, _)| (entity, target.direction))
+) -> Option<Entity> {
+    let cursor = window.cursor_position()?;
+    if !cursor_is_in_orientation_viewport(window, camera, cursor) {
+        return None;
+    }
+
+    let ray = camera.viewport_to_world(camera_transform, cursor).ok()?;
+    let mut best_hit = None::<(f32, Entity)>;
+
+    for (entity, shape, _, _) in blocks {
+        if let Some(distance) = ray_orientation_block_distance(&ray, shape.direction)
+            && best_hit
+                .map(|(best_distance, _)| distance < best_distance)
+                .unwrap_or(true)
+        {
+            best_hit = Some((distance, entity));
+        }
+    }
+
+    best_hit.map(|(_, entity)| entity)
+}
+
+fn cursor_is_in_orientation_viewport(window: &Window, camera: &Camera, cursor: Vec2) -> bool {
+    let Some(viewport) = &camera.viewport else {
+        return true;
+    };
+
+    let scale_factor = window.resolution.scale_factor();
+    let cursor = (cursor * scale_factor).round().as_uvec2();
+    let min = viewport.physical_position;
+    let max = min + viewport.physical_size;
+
+    cursor.x >= min.x && cursor.x <= max.x && cursor.y >= min.y && cursor.y <= max.y
+}
+
+fn ray_orientation_block_distance(ray: &Ray3d, direction: Vec3) -> Option<f32> {
+    let mut best_distance = None::<f32>;
+
+    for axis in 0..3 {
+        let step = direction[axis];
+        if step == 0.0 {
+            continue;
+        }
+
+        let sign = step.signum();
+        let mut normal = Vec3::ZERO;
+        normal[axis] = sign;
+        let normal = print_axis_to_world(normal);
+
+        let mut plane_origin = Vec3::ZERO;
+        plane_origin[axis] = sign * 0.5;
+        let plane_origin = print_axis_to_world(plane_origin);
+
+        let Some(distance) = ray.intersect_plane(plane_origin, InfinitePlane3d::new(normal)) else {
+            continue;
+        };
+        let point = world_axis_to_print(ray.get_point(distance));
+
+        let u_axis = (axis + 1) % 3;
+        let v_axis = (axis + 2) % 3;
+        let (u_min, u_max) = orientation_axis_range(direction[u_axis]);
+        let (v_min, v_max) = orientation_axis_range(direction[v_axis]);
+
+        if (point[axis] - 0.5 * sign).abs() <= 0.002
+            && point[u_axis] >= u_min - 0.002
+            && point[u_axis] <= u_max + 0.002
+            && point[v_axis] >= v_min - 0.002
+            && point[v_axis] <= v_max + 0.002
+            && best_distance
+                .map(|best_distance| distance < best_distance)
+                .unwrap_or(true)
+        {
+            best_distance = Some(distance);
+        }
+    }
+
+    best_distance
 }
 
 fn draw_selected_model_tools(
@@ -398,19 +523,11 @@ fn draw_ground_grid(gizmos: &mut Gizmos) {
     }
 }
 
-fn draw_orientation_axes(
-    gizmos: &mut Gizmos<OrientationGizmos>,
-    window: &Window,
-    camera_transform: &GlobalTransform,
-    axis_labels: &mut Query<(&OrientationAxisLabel, &mut Transform)>,
-) {
-    let origin = orientation_origin(window);
-    let projection = OrientationProjection::from_camera(camera_transform);
-
+fn draw_orientation_axes(gizmos: &mut Gizmos<OrientationGizmos>) {
     for (axis, color) in [
-        (Vec3::X, Color::srgb(0.95, 0.05, 0.04)),
-        (Vec3::Y, Color::srgb(0.05, 0.75, 0.12)),
-        (Vec3::Z, Color::srgb(0.10, 0.18, 1.00)),
+        (Vec3::X, Color::srgb(0.80, 0.42, 0.42)),
+        (Vec3::Y, Color::srgb(0.44, 0.76, 0.47)),
+        (Vec3::Z, Color::srgb(0.48, 0.51, 0.80)),
     ] {
         let axis_origin = print_axis_to_world(ORIENTATION_AXIS_CORNER);
         let axis_end = axis_origin + print_axis_to_world(axis) * ORIENTATION_AXIS_LENGTH;
@@ -418,64 +535,304 @@ fn draw_orientation_axes(
     }
     gizmos.sphere(
         print_axis_to_world(ORIENTATION_AXIS_CORNER),
-        0.045,
-        Color::srgb(0.84, 0.88, 0.92),
+        0.062,
+        Color::srgb(0.92, 0.94, 0.96),
     );
+}
 
+fn update_orientation_axis_label_transforms(
+    camera_transform: &GlobalTransform,
+    axis_labels: &mut Query<(&OrientationAxisLabel, &mut Transform)>,
+) {
     for (label, mut transform) in axis_labels {
-        let axis_end = ORIENTATION_AXIS_CORNER + label.axis * ORIENTATION_AXIS_LENGTH;
-        let direction = project_print_axis(label.axis, projection).normalize_or_zero();
-        let position = project_print_position(axis_end, origin, projection)
-            + direction * ORIENTATION_LABEL_OFFSET;
-        transform.translation = Vec3::new(position.x, position.y, 1.0);
+        let position = ORIENTATION_AXIS_CORNER
+            + label.axis * (ORIENTATION_AXIS_LENGTH + ORIENTATION_AXIS_LABEL_OFFSET);
+        transform.translation = print_axis_to_world(position);
+        transform.rotation = camera_transform.rotation();
     }
 }
 
-#[derive(Clone, Copy)]
-struct OrientationProjection {
-    screen_right: Vec3,
-    screen_up: Vec3,
+fn print_axis_to_world(axis: Vec3) -> Vec3 {
+    Vec3::new(axis.x, axis.z, -axis.y)
 }
 
-impl OrientationProjection {
-    fn from_camera(camera_transform: &GlobalTransform) -> Self {
-        let rotation = camera_transform.rotation();
+fn world_axis_to_print(axis: Vec3) -> Vec3 {
+    Vec3::new(axis.x, -axis.z, axis.y)
+}
 
-        Self {
-            screen_right: rotation * Vec3::X,
-            screen_up: rotation * Vec3::Y,
+fn orientation_block_mesh(block: &OrientationBlockSeed) -> Mesh {
+    let mut positions = Vec::<[f32; 3]>::new();
+    let mut normals = Vec::<[f32; 3]>::new();
+    let mut uvs = Vec::<[f32; 2]>::new();
+
+    for axis in 0..3 {
+        let step = block.direction[axis];
+        if step != 0.0 {
+            add_orientation_surface_quad(
+                axis,
+                step.signum(),
+                block.direction,
+                &mut positions,
+                &mut normals,
+                &mut uvs,
+            );
+        }
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh
+}
+
+fn orientation_axis_label_mesh() -> Mesh {
+    let half = ORIENTATION_AXIS_LABEL_SIZE * 0.5;
+    let positions = vec![
+        [-half, -half, 0.0],
+        [half, -half, 0.0],
+        [half, half, 0.0],
+        [-half, -half, 0.0],
+        [half, half, 0.0],
+        [-half, half, 0.0],
+    ];
+    let normals = vec![[0.0, 0.0, 1.0]; 6];
+    let uvs = vec![
+        [0.0, 1.0],
+        [1.0, 1.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 0.0],
+        [0.0, 0.0],
+    ];
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh
+}
+
+fn add_orientation_surface_quad(
+    axis: usize,
+    sign: f32,
+    direction: Vec3,
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+) {
+    let plane = sign * 0.5;
+    let mut normal = Vec3::ZERO;
+    normal[axis] = sign;
+    let world_normal = print_axis_to_world(normal).to_array();
+    let (right, up) = orientation_face_texture_basis(normal);
+    let (right_axis, right_sign) = orientation_signed_axis(right);
+    let (up_axis, up_sign) = orientation_signed_axis(up);
+    let (right_min, right_max) = orientation_axis_range(direction[right_axis]);
+    let (up_min, up_max) = orientation_axis_range(direction[up_axis]);
+    let left_coord = orientation_signed_coord(right_min, right_max, -right_sign);
+    let right_coord = orientation_signed_coord(right_min, right_max, right_sign);
+    let down_coord = orientation_signed_coord(up_min, up_max, -up_sign);
+    let up_coord = orientation_signed_coord(up_min, up_max, up_sign);
+
+    let quad_positions = [
+        (
+            orientation_surface_position(axis, plane, right_axis, left_coord, up_axis, down_coord),
+            [0.0, 1.0],
+        ),
+        (
+            orientation_surface_position(axis, plane, right_axis, right_coord, up_axis, down_coord),
+            [1.0, 1.0],
+        ),
+        (
+            orientation_surface_position(axis, plane, right_axis, right_coord, up_axis, up_coord),
+            [1.0, 0.0],
+        ),
+        (
+            orientation_surface_position(axis, plane, right_axis, left_coord, up_axis, up_coord),
+            [0.0, 0.0],
+        ),
+    ];
+
+    for triangle_index in [0, 1, 2, 0, 2, 3] {
+        let (position, uv) = quad_positions[triangle_index];
+        positions.push(print_axis_to_world(position).to_array());
+        normals.push(world_normal);
+        uvs.push(uv);
+    }
+}
+
+fn orientation_face_texture_basis(normal: Vec3) -> (Vec3, Vec3) {
+    let up = if normal.z != 0.0 {
+        Vec3::Y * normal.z.signum()
+    } else {
+        Vec3::Z
+    };
+    let right = (-normal).cross(up);
+
+    (right, up)
+}
+
+fn orientation_signed_axis(axis: Vec3) -> (usize, f32) {
+    if axis.x != 0.0 {
+        (0, axis.x.signum())
+    } else if axis.y != 0.0 {
+        (1, axis.y.signum())
+    } else {
+        (2, axis.z.signum())
+    }
+}
+
+fn orientation_signed_coord(min: f32, max: f32, sign: f32) -> f32 {
+    if sign > 0.0 { max } else { min }
+}
+
+fn orientation_surface_position(
+    plane_axis: usize,
+    plane: f32,
+    right_axis: usize,
+    right_coord: f32,
+    up_axis: usize,
+    up_coord: f32,
+) -> Vec3 {
+    let mut position = Vec3::ZERO;
+    position[plane_axis] = plane;
+    position[right_axis] = right_coord;
+    position[up_axis] = up_coord;
+    position
+}
+
+fn orientation_axis_range(step: f32) -> (f32, f32) {
+    if step > 0.0 {
+        (ORIENTATION_FACE_INSET, 0.5)
+    } else if step < 0.0 {
+        (-0.5, -ORIENTATION_FACE_INSET)
+    } else {
+        (-ORIENTATION_FACE_INSET, ORIENTATION_FACE_INSET)
+    }
+}
+
+fn orientation_face_texture_paths(direction: Vec3) -> (&'static str, &'static str) {
+    if direction.z > 0.0 {
+        ("viewcube/top.png", "viewcube/top-hover.png")
+    } else if direction.z < 0.0 {
+        ("viewcube/bottom.png", "viewcube/bottom-hover.png")
+    } else if direction.y > 0.0 {
+        ("viewcube/back.png", "viewcube/back-hover.png")
+    } else if direction.y < 0.0 {
+        ("viewcube/front.png", "viewcube/front-hover.png")
+    } else if direction.x < 0.0 {
+        ("viewcube/left.png", "viewcube/left-hover.png")
+    } else {
+        ("viewcube/right.png", "viewcube/right-hover.png")
+    }
+}
+
+fn orientation_label_texture(label: &str, text_color: [u8; 4], background: [u8; 4]) -> Image {
+    let size = ORIENTATION_LABEL_TEXTURE_SIZE;
+    let mut pixels = vec![0; (size * size * 4) as usize];
+
+    for chunk in pixels.chunks_exact_mut(4) {
+        chunk.copy_from_slice(&background);
+    }
+
+    let glyphs = label.chars().collect::<Vec<_>>();
+    let glyph_width = 5 * ORIENTATION_LABEL_GLYPH_SCALE;
+    let glyph_height = 7 * ORIENTATION_LABEL_GLYPH_SCALE;
+    let text_width = glyph_width * glyphs.len() as u32
+        + ORIENTATION_LABEL_GLYPH_SPACING * glyphs.len().saturating_sub(1) as u32;
+    let mut x = (size.saturating_sub(text_width)) / 2;
+    let y = (size.saturating_sub(glyph_height)) / 2;
+
+    for glyph in glyphs {
+        draw_orientation_glyph(&mut pixels, size, glyph, x, y, text_color);
+        x += glyph_width + ORIENTATION_LABEL_GLYPH_SPACING;
+    }
+
+    Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        pixels,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    )
+}
+
+fn draw_orientation_glyph(
+    pixels: &mut [u8],
+    texture_size: u32,
+    glyph: char,
+    x: u32,
+    y: u32,
+    color: [u8; 4],
+) {
+    for (row, pattern) in orientation_glyph_pattern(glyph).iter().enumerate() {
+        for (column, value) in pattern.as_bytes().iter().enumerate() {
+            if *value == b'#' {
+                draw_orientation_label_cell(
+                    pixels,
+                    texture_size,
+                    x + column as u32 * ORIENTATION_LABEL_GLYPH_SCALE,
+                    y + row as u32 * ORIENTATION_LABEL_GLYPH_SCALE,
+                    color,
+                );
+            }
         }
     }
 }
 
-fn orientation_origin(window: &Window) -> Vec2 {
-    Vec2::new(
-        -window.width() * 0.5 + ORIENTATION_MARGIN + ORIENTATION_VIEWPORT_SIZE * 0.5,
-        -window.height() * 0.5 + ORIENTATION_MARGIN + ORIENTATION_VIEWPORT_SIZE * 0.5,
-    )
+fn draw_orientation_label_cell(
+    pixels: &mut [u8],
+    texture_size: u32,
+    x: u32,
+    y: u32,
+    color: [u8; 4],
+) {
+    for py in y..(y + ORIENTATION_LABEL_GLYPH_SCALE) {
+        for px in x..(x + ORIENTATION_LABEL_GLYPH_SCALE) {
+            if px >= texture_size || py >= texture_size {
+                continue;
+            }
+            let index = ((py * texture_size + px) * 4) as usize;
+            pixels[index..index + 4].copy_from_slice(&color);
+        }
+    }
 }
 
-fn project_print_position(position: Vec3, origin: Vec2, projection: OrientationProjection) -> Vec2 {
-    origin + project_print_axis(position, projection) * ORIENTATION_CUBE_SIZE
-}
-
-fn project_print_axis(axis: Vec3, projection: OrientationProjection) -> Vec2 {
-    let world_axis = print_axis_to_world(axis);
-    Vec2::new(
-        world_axis.dot(projection.screen_right),
-        world_axis.dot(projection.screen_up),
-    )
-}
-
-fn print_axis_to_world(axis: Vec3) -> Vec3 {
-    Vec3::new(axis.x, axis.z, axis.y)
+fn orientation_glyph_pattern(glyph: char) -> [&'static str; 7] {
+    match glyph {
+        '-' => [
+            ".....", ".....", ".....", "#####", ".....", ".....", ".....",
+        ],
+        'X' | 'x' => [
+            "#...#", ".#.#.", "..#..", "..#..", "..#..", ".#.#.", "#...#",
+        ],
+        'Y' | 'y' => [
+            "#...#", ".#.#.", "..#..", "..#..", "..#..", "..#..", "..#..",
+        ],
+        'Z' | 'z' => [
+            "#####", "....#", "...#.", "..#..", ".#...", "#....", "#####",
+        ],
+        _ => [
+            ".....", ".....", ".....", ".....", ".....", ".....", ".....",
+        ],
+    }
 }
 
 struct OrientationBlockSeed {
     name: String,
-    center: Vec3,
-    size: Vec3,
     direction: Vec3,
+    kind: OrientationBlockKind,
 }
 
 fn orientation_cube_blocks() -> Vec<OrientationBlockSeed> {
@@ -496,52 +853,14 @@ fn orientation_cube_blocks() -> Vec<OrientationBlockSeed> {
 
                 blocks.push(OrientationBlockSeed {
                     name: orientation_block_name(direction),
-                    center: orientation_block_center(direction),
-                    size: orientation_block_size(direction, kind),
-                    direction: direction.normalize(),
+                    direction,
+                    kind,
                 });
             }
         }
     }
 
     blocks
-}
-
-fn orientation_block_center(direction: Vec3) -> Vec3 {
-    let offset = 0.5 - ORIENTATION_EDGE_BLOCK_WIDTH * 0.5;
-    Vec3::new(
-        orientation_axis_offset(direction.x, offset),
-        orientation_axis_offset(direction.y, offset),
-        orientation_axis_offset(direction.z, offset),
-    )
-}
-
-fn orientation_axis_offset(step: f32, offset: f32) -> f32 {
-    if step == 0.0 {
-        0.0
-    } else {
-        step.signum() * offset
-    }
-}
-
-fn orientation_block_size(direction: Vec3, kind: OrientationBlockKind) -> Vec3 {
-    let mut size = Vec3::splat(ORIENTATION_EDGE_BLOCK_WIDTH);
-
-    for axis in 0..3 {
-        let step = direction[axis];
-        if step != 0.0 {
-            continue;
-        }
-
-        size[axis] = match kind {
-            OrientationBlockKind::Face | OrientationBlockKind::Edge => {
-                ORIENTATION_CENTER_BLOCK_LENGTH
-            }
-            OrientationBlockKind::Corner => ORIENTATION_EDGE_BLOCK_WIDTH,
-        };
-    }
-
-    size
 }
 
 fn orientation_block_name(direction: Vec3) -> String {

@@ -164,6 +164,10 @@ pub(super) fn set_orbit_view_direction(orbit: &mut OrbitCamera, direction: Vec3)
     stop_orbit_inertia(orbit);
 }
 
+pub(super) fn sync_orbit_transform(transform: &mut Transform, orbit: &OrbitCamera) {
+    apply_orbit_transform(transform, orbit);
+}
+
 fn default_orbit_camera() -> OrbitCamera {
     OrbitCamera {
         target: Vec3::ZERO,

@@ -46,6 +46,11 @@ pub fn run_app() {
         .insert_gizmo_config::<OrientationGizmos>(
             OrientationGizmos,
             GizmoConfig {
+                line: bevy::gizmos::config::GizmoLineConfig {
+                    width: 4.0,
+                    ..default()
+                },
+                depth_bias: -0.25,
                 render_layers: RenderLayers::layer(1),
                 ..default()
             },
@@ -75,9 +80,9 @@ pub fn run_app() {
                 update_model_drag,
                 orbit_camera,
                 update_api_state_from_scene,
+                update_orientation_camera,
                 update_orientation_interaction,
                 draw_grid_and_selection,
-                update_orientation_camera,
                 draw_orientation_overlay,
             )
                 .chain(),

@@ -6,6 +6,8 @@ pub(super) fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    asset_server: Res<AssetServer>,
 ) {
     commands.spawn((
         DirectionalLight {
@@ -26,5 +28,11 @@ pub(super) fn setup_scene(
     ));
 
     spawn_orbit_camera(&mut commands);
-    spawn_orientation_overlay(&mut commands, &mut meshes, &mut materials);
+    spawn_orientation_overlay(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut images,
+        &asset_server,
+    );
 }
