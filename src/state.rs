@@ -21,6 +21,10 @@ pub(crate) enum ModelCommand {
         id: u32,
         transform: TransformSpec,
     },
+    SetColor {
+        id: u32,
+        color: [f32; 3],
+    },
     CenterOnOrigin(u32),
     DropToBuildPlate(u32),
     SetActiveTool(ToolModeSpec),

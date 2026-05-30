@@ -51,6 +51,13 @@ pub fn clear_active_tool() {
     push_command(ModelCommand::SetActiveTool(ToolModeSpec::None));
 }
 
+pub fn set_model_color(id: u32, red: f32, green: f32, blue: f32) {
+    push_command(ModelCommand::SetColor {
+        id,
+        color: [red, green, blue].map(sanitize_color_channel),
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn set_model_transform(
     id: u32,
@@ -74,6 +81,14 @@ pub fn set_model_transform(
 }
 
 pub use state::{last_error, model_info_json, selected_model_id, transform_json};
+
+fn sanitize_color_channel(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
 
 fn queue_mesh_model(name: String, mesh: MeshData) -> Result<u32, String> {
     let id = state::allocate_model_id();
@@ -147,6 +162,11 @@ mod wasm {
     #[wasm_bindgen]
     pub fn clear_tool_mode() {
         clear_active_tool();
+    }
+
+    #[wasm_bindgen]
+    pub fn set_color(id: u32, red: f32, green: f32, blue: f32) {
+        set_model_color(id, red, green, blue);
     }
 
     #[wasm_bindgen]

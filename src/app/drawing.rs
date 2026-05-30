@@ -957,8 +957,8 @@ fn world_aabb_corners(bounds: MeshBounds, transform: &Transform) -> [Vec3; 8] {
 
 fn draw_ground_grid(gizmos: &mut Gizmos) {
     let size = GRID_HALF_EXTENT;
-    let color = Color::srgba(0.48, 0.52, 0.58, 0.32);
-    let axis_color = Color::srgba(0.82, 0.84, 0.88, 0.5);
+    let color = Color::srgba(0.18, 0.20, 0.21, 0.34);
+    let axis_color = Color::srgba(0.12, 0.13, 0.14, 0.58);
 
     for i in -size..=size {
         let i = i as f32;

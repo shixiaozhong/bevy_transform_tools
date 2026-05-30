@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{color::LinearRgba, prelude::*};
 
 use crate::{
     mesh::{MeshBounds, MeshData},
@@ -40,7 +40,12 @@ pub(super) fn apply_model_commands(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut selected: ResMut<SelectedModel>,
     mut active_tool: ResMut<ActiveTool>,
-    mut models: Query<(Entity, &ImportedModel, &mut Transform)>,
+    mut models: Query<(
+        Entity,
+        &ImportedModel,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
 ) {
     for command in state::drain_commands() {
         match command {
@@ -59,14 +64,24 @@ pub(super) fn apply_model_commands(
                 transform,
             ),
             ModelCommand::SetTransform { id, transform } => {
-                for (_, model, mut model_transform) in &mut models {
+                for (_, model, mut model_transform, _) in &mut models {
                     if model.id == id {
                         *model_transform = transform.to_transform();
                     }
                 }
             }
+            ModelCommand::SetColor { id, color } => {
+                for (_, model, _, material) in &mut models {
+                    if model.id == id {
+                        if let Some(material) = materials.get_mut(&material.0) {
+                            apply_model_color(material, color);
+                        }
+                        break;
+                    }
+                }
+            }
             ModelCommand::CenterOnOrigin(id) => {
-                for (_, model, mut model_transform) in &mut models {
+                for (_, model, mut model_transform, _) in &mut models {
                     if model.id == id {
                         center_model_on_origin(model, &mut model_transform);
                         break;
@@ -74,7 +89,7 @@ pub(super) fn apply_model_commands(
                 }
             }
             ModelCommand::DropToBuildPlate(id) => {
-                for (_, model, mut model_transform) in &mut models {
+                for (_, model, mut model_transform, _) in &mut models {
                     if model.id == id {
                         drop_model_to_build_plate(model, &mut model_transform);
                         break;
@@ -83,14 +98,14 @@ pub(super) fn apply_model_commands(
             }
             ModelCommand::SetActiveTool(mode) => active_tool.set_mode(mode),
             ModelCommand::RemoveAll => {
-                for (entity, _, _) in &mut models {
+                for (entity, _, _, _) in &mut models {
                     commands.entity(entity).despawn();
                 }
                 selected.0 = None;
                 active_tool.set_mode(state::ToolModeSpec::None);
             }
             ModelCommand::Select(id) => {
-                if models.iter_mut().any(|(_, model, _)| model.id == id) {
+                if models.iter_mut().any(|(_, model, _, _)| model.id == id) {
                     selected.0 = Some(id);
                 }
             }
@@ -107,10 +122,13 @@ fn spawn_imported_model(
     mesh: MeshData,
     transform: state::TransformSpec,
 ) {
+    let default_color = [0.62, 0.69, 0.78];
     let material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.62, 0.69, 0.78),
+        base_color: Color::srgb(default_color[0], default_color[1], default_color[2]),
+        emissive: model_emissive(default_color),
         metallic: 0.0,
-        perceptual_roughness: 0.72,
+        perceptual_roughness: 0.46,
+        reflectance: 0.56,
         double_sided: true,
         cull_mode: None,
         ..default()
@@ -219,4 +237,18 @@ fn model_info_snapshot(model: &ImportedModel, transform: &Transform) -> ModelInf
         volume,
         triangle_count: model.triangle_count,
     }
+}
+
+fn apply_model_color(material: &mut StandardMaterial, color: [f32; 3]) {
+    material.base_color = Color::srgb(color[0], color[1], color[2]);
+    material.emissive = model_emissive(color);
+}
+
+fn model_emissive(color: [f32; 3]) -> LinearRgba {
+    let linear = Color::srgb(color[0], color[1], color[2]).to_linear();
+    LinearRgba::rgb(
+        linear.red * 0.018,
+        linear.green * 0.018,
+        linear.blue * 0.018,
+    )
 }

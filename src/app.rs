@@ -23,7 +23,7 @@ use interaction::{
     update_model_drag, update_move_gizmo_drag, update_rotate_gizmo_hover,
 };
 use model::{ModelDrag, SelectedModel, apply_model_commands, update_api_state_from_scene};
-use scene::setup_scene;
+use scene::{setup_scene, sync_camera_fill_light};
 use tool::ActiveTool;
 
 pub(super) const GRID_HALF_EXTENT: i32 = 50;
@@ -37,7 +37,12 @@ pub(super) const ORBIT_VELOCITY_EPSILON: f32 = 0.001;
 
 pub fn run_app() {
     App::new()
-        .insert_resource(ClearColor(Color::srgb(0.03, 0.035, 0.045)))
+        .insert_resource(ClearColor(Color::srgb(0.78, 0.78, 0.76)))
+        .insert_resource(GlobalAmbientLight {
+            color: Color::WHITE,
+            brightness: 180.0,
+            ..default()
+        })
         .insert_resource(SelectedModel::default())
         .insert_resource(ModelDrag::default())
         .insert_resource(GizmoDrag::default())
@@ -64,7 +69,7 @@ pub fn run_app() {
                 present_mode: PresentMode::AutoVsync,
                 fit_canvas_to_parent: true,
                 prevent_default_event_handling: true,
-                window_theme: Some(WindowTheme::Dark),
+                window_theme: Some(WindowTheme::Light),
                 ..default()
             }),
             ..default()
@@ -82,6 +87,7 @@ pub fn run_app() {
                 update_move_gizmo_drag,
                 update_model_drag,
                 orbit_camera,
+                sync_camera_fill_light,
                 update_api_state_from_scene,
                 update_orientation_camera,
                 update_orientation_interaction,

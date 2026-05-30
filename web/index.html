@@ -61,7 +61,8 @@
         display: none;
       }
 
-      .toolbar input[type="file"] {
+      .toolbar input[type="file"],
+      .toolbar input[type="color"] {
         display: none;
       }
 
@@ -89,6 +90,15 @@
         fill: none;
         stroke-linecap: round;
         stroke-linejoin: round;
+      }
+
+      .color-swatch {
+        width: 30px;
+        height: 30px;
+        border: 2px solid currentColor;
+        border-radius: 50%;
+        background: var(--model-color, #9eb0c7);
+        box-shadow: inset 0 0 0 3px rgb(0 0 0 / 18%);
       }
 
       .tool-label {
@@ -216,6 +226,7 @@
     <div class="toolbar-shell">
       <div class="toolbar" role="toolbar" aria-label="Model tools">
         <input id="model-file" type="file" accept=".obj,.stl" />
+        <input id="model-color" type="color" value="#9eb0c7" />
         <button
           id="import-model"
           class="tool-button"
@@ -359,6 +370,18 @@
           </svg>
           <span class="tool-label">贴底面</span>
         </button>
+        <button
+          id="color-model"
+          class="tool-button"
+          type="button"
+          title="模型颜色"
+          aria-label="模型颜色"
+          data-requires-selection
+          disabled
+        >
+          <span class="color-swatch" aria-hidden="true"></span>
+          <span class="tool-label">颜色</span>
+        </button>
       </div>
     </div>
 
@@ -375,6 +398,7 @@
         get_model_info_json,
         load_obj_model,
         load_stl_model,
+        set_color,
       } from "./pkg/bevy_transform_tools.js";
 
       await init();
@@ -400,6 +424,8 @@
       const moveButton = document.querySelector("#move-tool");
       const scaleButton = document.querySelector("#scale-tool");
       const rotateButton = document.querySelector("#rotate-tool");
+      const colorButton = document.querySelector("#color-model");
+      const colorInput = document.querySelector("#model-color");
       const centerButton = document.querySelector("#center-model");
       const dropButton = document.querySelector("#drop-model");
       const modelInfoPanel = document.querySelector("#model-info-panel");
@@ -469,6 +495,25 @@
         }
       });
 
+      colorButton.addEventListener("click", () => {
+        if (selectedModelId !== 0) {
+          colorInput.click();
+        }
+      });
+
+      colorInput.addEventListener("input", () => {
+        if (selectedModelId === 0) {
+          return;
+        }
+
+        const color = parseHexColor(colorInput.value);
+        document.documentElement.style.setProperty(
+          "--model-color",
+          colorInput.value,
+        );
+        set_color(selectedModelId, color.red, color.green, color.blue);
+      });
+
       centerButton.addEventListener("click", () => {
         if (selectedModelId !== 0) {
           center_model(selectedModelId);
@@ -493,6 +538,16 @@
 
       const formatFixed = (value, digits) =>
         Number.isFinite(value) ? value.toFixed(digits) : (0).toFixed(digits);
+
+      const parseHexColor = (value) => {
+        const normalized = /^#[0-9a-f]{6}$/i.test(value) ? value : "#9eb0c7";
+        const number = Number.parseInt(normalized.slice(1), 16);
+        return {
+          red: ((number >> 16) & 0xff) / 255,
+          green: ((number >> 8) & 0xff) / 255,
+          blue: (number & 0xff) / 255,
+        };
+      };
 
       const updateModelInfoPanel = () => {
         if (selectedModelId === 0) {

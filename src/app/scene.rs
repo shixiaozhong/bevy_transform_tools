@@ -1,6 +1,12 @@
 use bevy::prelude::*;
 
-use super::{camera::spawn_orbit_camera, drawing::spawn_orientation_overlay};
+use super::{
+    camera::{OrbitCamera, spawn_orbit_camera},
+    drawing::spawn_orientation_overlay,
+};
+
+#[derive(Component)]
+pub(super) struct CameraFillLight;
 
 pub(super) fn setup_scene(
     mut commands: Commands,
@@ -11,20 +17,40 @@ pub(super) fn setup_scene(
 ) {
     commands.spawn((
         DirectionalLight {
-            illuminance: 6_000.0,
+            illuminance: 9_500.0,
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(4.0, 7.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(-5.0, 8.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 1_500.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(5.0, 5.0, -5.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 1_700.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::default(),
+        CameraFillLight,
     ));
 
     commands.spawn((
         PointLight {
-            intensity: 500.0,
-            range: 20.0,
+            intensity: 850.0,
+            range: 24.0,
+            shadows_enabled: false,
             ..default()
         },
-        Transform::from_xyz(-4.0, 5.0, -3.0),
+        Transform::from_xyz(0.0, 5.0, 4.0),
     ));
 
     spawn_orbit_camera(&mut commands);
@@ -35,4 +61,14 @@ pub(super) fn setup_scene(
         &mut images,
         &asset_server,
     );
+}
+
+pub(super) fn sync_camera_fill_light(
+    camera: Single<&GlobalTransform, With<OrbitCamera>>,
+    mut lights: Query<&mut Transform, (With<CameraFillLight>, Without<OrbitCamera>)>,
+) {
+    let camera_transform = camera.compute_transform();
+    for mut light_transform in &mut lights {
+        *light_transform = camera_transform;
+    }
 }
