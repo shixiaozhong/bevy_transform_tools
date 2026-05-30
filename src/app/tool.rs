@@ -8,6 +8,7 @@ pub(super) enum ToolMode {
     None,
     Move,
     Rotate,
+    Scale,
 }
 
 #[derive(Resource, Default)]
@@ -21,6 +22,7 @@ impl ActiveTool {
             ToolModeSpec::None => ToolMode::None,
             ToolModeSpec::Move => ToolMode::Move,
             ToolModeSpec::Rotate => ToolMode::Rotate,
+            ToolModeSpec::Scale => ToolMode::Scale,
         };
     }
 
@@ -30,5 +32,9 @@ impl ActiveTool {
 
     pub(super) fn is_rotate(&self) -> bool {
         self.mode == ToolMode::Rotate
+    }
+
+    pub(super) fn is_scale(&self) -> bool {
+        self.mode == ToolMode::Scale
     }
 }

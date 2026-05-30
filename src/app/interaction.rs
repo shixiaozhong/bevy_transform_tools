@@ -42,6 +42,19 @@ impl GizmoDrag {
         }
     }
 
+    pub(super) fn active_scale(&self) -> Option<Option<usize>> {
+        match self.active {
+            Some(GizmoDragState {
+                mode: GizmoDragMode::Scale { mode, .. },
+                ..
+            }) => Some(match mode {
+                ScaleDragMode::Uniform => None,
+                ScaleDragMode::Axis { component } => Some(component),
+            }),
+            _ => None,
+        }
+    }
+
     fn suppress_next_clear_click(&mut self) {
         self.suppress_clear_click_frames = 2;
     }
@@ -79,6 +92,19 @@ enum GizmoDragMode {
         start_rotation: Quat,
         angle_delta: f32,
     },
+    Scale {
+        mode: ScaleDragMode,
+        screen_axis: Vec2,
+        start_cursor: Vec2,
+        start_scale: Vec3,
+        origin: Vec3,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ScaleDragMode {
+    Uniform,
+    Axis { component: usize },
 }
 
 pub(super) fn select_model_on_click(
@@ -137,7 +163,11 @@ pub(super) fn start_model_drag(
     mut model_drag: ResMut<ModelDrag>,
     mut selected: ResMut<SelectedModel>,
 ) {
-    if drag.button != PointerButton::Primary || active_tool.is_move() || active_tool.is_rotate() {
+    if drag.button != PointerButton::Primary
+        || active_tool.is_move()
+        || active_tool.is_rotate()
+        || active_tool.is_scale()
+    {
         return;
     }
 
@@ -174,7 +204,7 @@ pub(super) fn begin_move_gizmo_drag(
     models: Query<(&ImportedModel, &Transform)>,
     mut drag: ResMut<GizmoDrag>,
 ) {
-    if (!active_tool.is_move() && !active_tool.is_rotate())
+    if (!active_tool.is_move() && !active_tool.is_rotate() && !active_tool.is_scale())
         || !buttons.just_pressed(MouseButton::Left)
         || drag.active.is_some()
     {
@@ -218,6 +248,17 @@ pub(super) fn begin_move_gizmo_drag(
                 origin,
                 radius,
                 transform.rotation,
+            ) {
+                drag.active = Some(active);
+            }
+        } else if active_tool.is_scale() {
+            if let Some(active) = pick_scale_gizmo_handle(
+                selected_id,
+                cursor,
+                camera,
+                camera_transform,
+                model,
+                transform,
             ) {
                 drag.active = Some(active);
             }
@@ -334,6 +375,36 @@ pub(super) fn update_move_gizmo_drag(
             for (model, mut transform) in &mut models {
                 if model.id == active.id {
                     transform.rotation = Quat::from_axis_angle(*axis, angle) * *start_rotation;
+                    if let Some(bounds) = model.bounds {
+                        transform.translation =
+                            *origin - transform.rotation * (bounds.center * transform.scale);
+                    } else {
+                        transform.translation = *origin;
+                    }
+                    break;
+                }
+            }
+        }
+        GizmoDragMode::Scale {
+            mode,
+            screen_axis,
+            start_cursor,
+            start_scale,
+            origin,
+        } => {
+            let delta = (cursor - *start_cursor).dot(*screen_axis);
+            let factor = (1.0 + delta * 0.01).clamp(0.05, 20.0);
+            for (model, mut transform) in &mut models {
+                if model.id == active.id {
+                    match *mode {
+                        ScaleDragMode::Uniform => {
+                            transform.scale = *start_scale * factor;
+                        }
+                        ScaleDragMode::Axis { component } => {
+                            transform.scale = *start_scale;
+                            transform.scale[component] = start_scale[component] * factor;
+                        }
+                    }
                     if let Some(bounds) = model.bounds {
                         transform.translation =
                             *origin - transform.rotation * (bounds.center * transform.scale);
@@ -572,6 +643,127 @@ fn distance_to_projected_rotation_handle(
     } else {
         None
     }
+}
+
+fn pick_scale_gizmo_handle(
+    id: u32,
+    cursor: Vec2,
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    model: &ImportedModel,
+    transform: &Transform,
+) -> Option<GizmoDragState> {
+    let handles = scale_gizmo_handles(model, transform);
+    let mut best = None::<(f32, GizmoDragState)>;
+
+    for (position, mode, drag_axis) in handles {
+        let projected = camera.world_to_viewport(camera_transform, position).ok()?;
+        let distance = cursor.distance(projected);
+        if distance > 18.0 {
+            continue;
+        }
+
+        let axis_end = camera
+            .world_to_viewport(camera_transform, position + drag_axis)
+            .ok()?;
+        let mut screen_axis = axis_end - projected;
+        if screen_axis.length_squared() < 16.0 {
+            screen_axis = Vec2::Y;
+        } else {
+            screen_axis = screen_axis.normalize();
+        }
+
+        let drag = GizmoDragState {
+            id,
+            mode: GizmoDragMode::Scale {
+                mode,
+                screen_axis,
+                start_cursor: cursor,
+                start_scale: transform.scale,
+                origin: model_visual_center(model, transform),
+            },
+        };
+
+        if best
+            .map(|(best_distance, _)| distance < best_distance)
+            .unwrap_or(true)
+        {
+            best = Some((distance, drag));
+        }
+    }
+
+    best.map(|(_, drag)| drag)
+}
+
+fn scale_gizmo_handles(
+    model: &ImportedModel,
+    transform: &Transform,
+) -> Vec<(Vec3, ScaleDragMode, Vec3)> {
+    let (min, max) = scale_gizmo_bounds(model, transform);
+    let center = (min + max) * 0.5;
+    let bottom_y = min.y;
+    let top_y = max.y;
+    let mut handles = Vec::with_capacity(9);
+
+    for x in [min.x, max.x] {
+        for z in [min.z, max.z] {
+            handles.push((
+                Vec3::new(x, bottom_y, z),
+                ScaleDragMode::Uniform,
+                (Vec3::new(x, bottom_y, z) - center).normalize_or_zero(),
+            ));
+        }
+    }
+
+    handles.push((
+        Vec3::new(min.x, bottom_y, center.z),
+        ScaleDragMode::Axis { component: 0 },
+        Vec3::NEG_X,
+    ));
+    handles.push((
+        Vec3::new(max.x, bottom_y, center.z),
+        ScaleDragMode::Axis { component: 0 },
+        Vec3::X,
+    ));
+    handles.push((
+        Vec3::new(center.x, bottom_y, min.z),
+        ScaleDragMode::Axis { component: 2 },
+        Vec3::NEG_Z,
+    ));
+    handles.push((
+        Vec3::new(center.x, bottom_y, max.z),
+        ScaleDragMode::Axis { component: 2 },
+        Vec3::Z,
+    ));
+    handles.push((
+        Vec3::new(center.x, top_y, center.z),
+        ScaleDragMode::Axis { component: 1 },
+        Vec3::Y,
+    ));
+
+    handles
+}
+
+fn scale_gizmo_bounds(model: &ImportedModel, transform: &Transform) -> (Vec3, Vec3) {
+    let Some(bounds) = model.bounds else {
+        let half = Vec3::splat(0.5);
+        return (transform.translation - half, transform.translation + half);
+    };
+
+    let half = bounds.size * 0.5;
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for x in [-half.x, half.x] {
+        for y in [-half.y, half.y] {
+            for z in [-half.z, half.z] {
+                let point = transform.transform_point(bounds.center + Vec3::new(x, y, z));
+                min = min.min(point);
+                max = max.max(point);
+            }
+        }
+    }
+
+    (min, max)
 }
 
 fn cursor_rotation_vector(

@@ -29,6 +29,7 @@ const ORIENTATION_LABEL_TEXTURE_SIZE: u32 = 128;
 const ORIENTATION_LABEL_GLYPH_SCALE: u32 = 11;
 const ORIENTATION_LABEL_GLYPH_SPACING: u32 = 6;
 const ROTATION_ANGLE_LABEL_OFFSET: Vec2 = Vec2::new(12.0, 10.0);
+const SCALE_HANDLE_COUNT: usize = 9;
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub(super) struct OrientationGizmos;
@@ -56,6 +57,11 @@ pub(super) struct RotationAngleLabel;
 
 #[derive(Component)]
 pub(super) struct RotationAngleText;
+
+#[derive(Component)]
+pub(super) struct ScaleHandleVisual {
+    index: usize,
+}
 
 #[derive(Resource, Default)]
 pub(super) struct OrientationInteraction {
@@ -88,6 +94,30 @@ pub(super) fn spawn_orientation_overlay(
     spawn_orientation_cube_blocks(commands, meshes, materials, asset_server);
     spawn_orientation_axis_labels(commands, meshes, materials, images);
     spawn_rotation_angle_label(commands);
+    spawn_scale_handle_visuals(commands, meshes, materials);
+}
+
+fn spawn_scale_handle_visuals(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    for index in 0..SCALE_HANDLE_COUNT {
+        commands.spawn((
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.0, 0.78, 0.82),
+                perceptual_roughness: 0.82,
+                metallic: 0.0,
+                ..default()
+            })),
+            Transform::from_scale(Vec3::splat(0.001)),
+            Visibility::Hidden,
+            ScaleHandleVisual { index },
+            Name::new(format!("Scale Handle Visual {index}")),
+        ));
+    }
 }
 
 fn spawn_rotation_angle_label(commands: &mut Commands) {
@@ -275,9 +305,26 @@ pub(super) fn draw_grid_and_selection(
     gizmo_drag: Res<GizmoDrag>,
     rotate_hover: Res<RotateGizmoHover>,
     models: Query<(&ImportedModel, &Transform)>,
+    mut scale_handles: Query<
+        (
+            &ScaleHandleVisual,
+            &mut Transform,
+            &mut Visibility,
+            &mut MeshMaterial3d<StandardMaterial>,
+        ),
+        Without<ImportedModel>,
+    >,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut gizmos: Gizmos,
 ) {
     draw_ground_grid(&mut gizmos);
+    update_scale_handle_visuals(
+        selected.0,
+        &active_tool,
+        &models,
+        &mut scale_handles,
+        &mut materials,
+    );
     draw_selected_model_tools(
         &mut gizmos,
         selected.0,
@@ -298,6 +345,18 @@ pub(super) fn update_rotation_angle_label(
     mut label: Single<&mut Node, With<RotationAngleLabel>>,
     mut text: Single<&mut Text, With<RotationAngleText>>,
 ) {
+    if active_tool.is_scale() {
+        update_scale_label(
+            selected,
+            &gizmo_drag,
+            camera.into_inner(),
+            &models,
+            &mut label,
+            &mut text,
+        );
+        return;
+    }
+
     let Some((axis, angle)) = rotation_angle_label_state(&gizmo_drag, &rotate_hover) else {
         label.display = Display::None;
         return;
@@ -341,6 +400,53 @@ pub(super) fn update_rotation_angle_label(
             rotation_axis_label(print_axis),
             normalized_degrees(angle)
         );
+        return;
+    }
+
+    label.display = Display::None;
+}
+
+fn update_scale_label(
+    selected: Res<SelectedModel>,
+    gizmo_drag: &GizmoDrag,
+    (camera, camera_transform): (&Camera, &GlobalTransform),
+    models: &Query<(&ImportedModel, &Transform)>,
+    label: &mut Node,
+    text: &mut Text,
+) {
+    let Some(component) = gizmo_drag.active_scale() else {
+        label.display = Display::None;
+        return;
+    };
+    let Some(selected_id) = selected.0 else {
+        label.display = Display::None;
+        return;
+    };
+
+    for (model, transform) in models {
+        if model.id != selected_id {
+            continue;
+        }
+        let position = model_visual_center(model, transform);
+        let Ok(screen_position) = camera.world_to_viewport(camera_transform, position) else {
+            label.display = Display::None;
+            return;
+        };
+
+        label.display = Display::Flex;
+        label.left = Val::Px(screen_position.x + 28.0);
+        label.top = Val::Px(screen_position.y + 28.0);
+        text.0 = match component {
+            Some(0) => format!("X: {:.2}%", transform.scale.x * 100.0),
+            Some(2) => format!("Y: {:.2}%", transform.scale.z * 100.0),
+            Some(1) => format!("Z: {:.2}%", transform.scale.y * 100.0),
+            _ => format!(
+                "X: {:.2}%\nY: {:.2}%\nZ: {:.2}%",
+                transform.scale.x * 100.0,
+                transform.scale.z * 100.0,
+                transform.scale.y * 100.0
+            ),
+        };
         return;
     }
 
@@ -544,6 +650,7 @@ fn draw_selected_model_tools(
 
         if !active_tool.is_move()
             && !active_tool.is_rotate()
+            && !active_tool.is_scale()
             && let Some(bounds) = model.bounds
         {
             draw_model_aabb(gizmos, bounds, transform);
@@ -559,6 +666,9 @@ fn draw_selected_model_tools(
                 gizmo_drag.active_rotation(),
                 rotate_hover.axis,
             );
+        }
+        if active_tool.is_scale() {
+            draw_scale_gizmo(gizmos, model, transform);
         }
 
         break;
@@ -576,6 +686,101 @@ fn draw_move_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Trans
     gizmos.arrow(origin, origin + Vec3::Y * length, y_color);
     gizmos.arrow(origin, origin + Vec3::Z * length, z_color);
     gizmos.sphere(origin, 0.07 * length, Color::srgb(0.08, 0.52, 0.48));
+}
+
+fn draw_scale_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Transform) {
+    let (min, max) = scale_gizmo_bounds(model, transform);
+    let bottom_y = min.y;
+    let red = Color::srgb(0.95, 0.05, 0.04);
+
+    let base_corners = [
+        Vec3::new(min.x, bottom_y, min.z),
+        Vec3::new(max.x, bottom_y, min.z),
+        Vec3::new(max.x, bottom_y, max.z),
+        Vec3::new(min.x, bottom_y, max.z),
+    ];
+    for index in 0..4 {
+        gizmos.line(base_corners[index], base_corners[(index + 1) % 4], red);
+    }
+}
+
+fn update_scale_handle_visuals(
+    selected_id: Option<u32>,
+    active_tool: &ActiveTool,
+    models: &Query<(&ImportedModel, &Transform)>,
+    scale_handles: &mut Query<
+        (
+            &ScaleHandleVisual,
+            &mut Transform,
+            &mut Visibility,
+            &mut MeshMaterial3d<StandardMaterial>,
+        ),
+        Without<ImportedModel>,
+    >,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let Some(selected_id) = selected_id.filter(|_| active_tool.is_scale()) else {
+        for (_, _, mut visibility, _) in scale_handles {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+
+    let Some((model, transform)) = models.iter().find(|(model, _)| model.id == selected_id) else {
+        for (_, _, mut visibility, _) in scale_handles {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+
+    let handle_size = move_gizmo_length(model, transform) * 0.055;
+    let handles = scale_handle_visual_layout(model, transform);
+
+    for (handle, mut handle_transform, mut visibility, mut material) in scale_handles {
+        let Some((position, color)) = handles.get(handle.index).copied() else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+
+        handle_transform.translation = position;
+        handle_transform.rotation = Quat::IDENTITY;
+        handle_transform.scale = Vec3::splat(handle_size);
+        *visibility = Visibility::Visible;
+
+        if let Some(existing) = materials.get_mut(&material.0) {
+            existing.base_color = color;
+        } else {
+            material.0 = materials.add(StandardMaterial {
+                base_color: color,
+                perceptual_roughness: 0.82,
+                metallic: 0.0,
+                ..default()
+            });
+        }
+    }
+}
+
+fn scale_handle_visual_layout(model: &ImportedModel, transform: &Transform) -> [(Vec3, Color); 9] {
+    let (min, max) = scale_gizmo_bounds(model, transform);
+    let center = (min + max) * 0.5;
+    let bottom_y = min.y;
+    let top_y = max.y;
+    let red = Color::srgb(0.95, 0.05, 0.04);
+    let green = Color::srgb(0.05, 0.78, 0.12);
+    let blue = Color::srgb(0.04, 0.16, 0.95);
+    let cyan = Color::srgb(0.0, 0.78, 0.82);
+
+    [
+        (Vec3::new(min.x, bottom_y, min.z), cyan),
+        (Vec3::new(max.x, bottom_y, min.z), cyan),
+        (Vec3::new(max.x, bottom_y, max.z), cyan),
+        (Vec3::new(min.x, bottom_y, max.z), cyan),
+        (Vec3::new(min.x, bottom_y, center.z), red),
+        (Vec3::new(max.x, bottom_y, center.z), red),
+        (Vec3::new(center.x, bottom_y, min.z), green),
+        (Vec3::new(center.x, bottom_y, max.z), green),
+        (Vec3::new(center.x, top_y, center.z), blue),
+    ]
 }
 
 fn draw_rotate_gizmo(
@@ -1162,6 +1367,28 @@ fn move_gizmo_length(model: &ImportedModel, transform: &Transform) -> f32 {
 
 fn rotate_gizmo_radius(model: &ImportedModel, transform: &Transform) -> f32 {
     move_gizmo_length(model, transform) * 0.86
+}
+
+fn scale_gizmo_bounds(model: &ImportedModel, transform: &Transform) -> (Vec3, Vec3) {
+    let Some(bounds) = model.bounds else {
+        let half = Vec3::splat(0.5);
+        return (transform.translation - half, transform.translation + half);
+    };
+
+    let half = bounds.size * 0.5;
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for x in [-half.x, half.x] {
+        for y in [-half.y, half.y] {
+            for z in [-half.z, half.z] {
+                let point = transform.transform_point(bounds.center + Vec3::new(x, y, z));
+                min = min.min(point);
+                max = max.max(point);
+            }
+        }
+    }
+
+    (min, max)
 }
 
 fn world_axis_to_rotation_print_axis(axis: Vec3) -> Option<Vec3> {

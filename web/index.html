@@ -210,6 +210,7 @@
           <span class="tool-label">移动</span>
         </button>
         <button
+          id="scale-tool"
           class="tool-button"
           type="button"
           title="缩放"
@@ -321,6 +322,7 @@
       import init, {
         activate_move_tool_mode,
         activate_rotate_tool_mode,
+        activate_scale_tool_mode,
         center_model,
         clear_tool_mode,
         drop_model_to_platform,
@@ -349,6 +351,7 @@
       const fileInput = document.querySelector("#model-file");
       const importButton = document.querySelector("#import-model");
       const moveButton = document.querySelector("#move-tool");
+      const scaleButton = document.querySelector("#scale-tool");
       const rotateButton = document.querySelector("#rotate-tool");
       const centerButton = document.querySelector("#center-model");
       const dropButton = document.querySelector("#drop-model");
@@ -403,6 +406,20 @@
         }
       });
 
+      scaleButton.addEventListener("click", () => {
+        if (selectedModelId === 0) {
+          return;
+        }
+
+        if (activeTool === "scale") {
+          clear_tool_mode();
+          setActiveToolButton(null);
+        } else {
+          activate_scale_tool_mode();
+          setActiveToolButton("scale");
+        }
+      });
+
       centerButton.addEventListener("click", () => {
         if (selectedModelId !== 0) {
           center_model(selectedModelId);
@@ -427,6 +444,7 @@
       const setActiveToolButton = (tool) => {
         activeTool = tool;
         moveButton.classList.toggle("is-active", tool === "move");
+        scaleButton.classList.toggle("is-active", tool === "scale");
         rotateButton.classList.toggle("is-active", tool === "rotate");
       };
       let selectedModelId = 0;

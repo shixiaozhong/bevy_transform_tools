@@ -43,6 +43,10 @@ pub fn activate_rotate_tool() {
     push_command(ModelCommand::SetActiveTool(ToolModeSpec::Rotate));
 }
 
+pub fn activate_scale_tool() {
+    push_command(ModelCommand::SetActiveTool(ToolModeSpec::Scale));
+}
+
 pub fn clear_active_tool() {
     push_command(ModelCommand::SetActiveTool(ToolModeSpec::None));
 }
@@ -133,6 +137,11 @@ mod wasm {
     #[wasm_bindgen]
     pub fn activate_rotate_tool_mode() {
         activate_rotate_tool();
+    }
+
+    #[wasm_bindgen]
+    pub fn activate_scale_tool_mode() {
+        activate_scale_tool();
     }
 
     #[wasm_bindgen]
