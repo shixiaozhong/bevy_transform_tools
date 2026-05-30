@@ -73,7 +73,7 @@ pub fn set_model_transform(
     push_command(ModelCommand::SetTransform { id, transform });
 }
 
-pub use state::{last_error, selected_model_id, transform_json};
+pub use state::{last_error, model_info_json, selected_model_id, transform_json};
 
 fn queue_mesh_model(name: String, mesh: MeshData) -> Result<u32, String> {
     let id = state::allocate_model_id();
@@ -157,6 +157,11 @@ mod wasm {
     #[wasm_bindgen]
     pub fn get_model_transform_json(id: u32) -> String {
         transform_json(id)
+    }
+
+    #[wasm_bindgen]
+    pub fn get_model_info_json(id: u32) -> String {
+        model_info_json(id)
     }
 
     #[wasm_bindgen]

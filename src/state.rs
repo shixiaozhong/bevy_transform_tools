@@ -102,11 +102,34 @@ impl TransformSnapshot {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ModelInfoSnapshot {
+    pub(crate) name: String,
+    pub(crate) size: [f32; 3],
+    pub(crate) volume: f64,
+    pub(crate) triangle_count: usize,
+}
+
+impl ModelInfoSnapshot {
+    fn to_json(&self) -> String {
+        format!(
+            "{{\"name\":{},\"size\":[{},{},{}],\"volume\":{},\"triangle_count\":{}}}",
+            json_string(&self.name),
+            self.size[0],
+            self.size[1],
+            self.size[2],
+            self.volume,
+            self.triangle_count
+        )
+    }
+}
+
 #[derive(Default)]
 struct ApiState {
     next_id: u32,
     selected: Option<u32>,
     transforms: HashMap<u32, TransformSnapshot>,
+    model_infos: HashMap<u32, ModelInfoSnapshot>,
     last_error: String,
 }
 
@@ -141,36 +164,51 @@ pub(crate) fn remember_queued_model_transform(id: u32, transform: Transform) {
 }
 
 pub(crate) fn remember_selection(id: Option<u32>) {
-    API_STATE.with(|state| update_selected(&mut state.borrow_mut(), id));
+    let changed = API_STATE.with(|state| update_selected(&mut state.borrow_mut(), id));
+    if changed {
+        notify_selection_changed(id);
+    }
 }
 
 pub(crate) fn clear_api_models() {
-    API_STATE.with(|state| {
+    let changed = API_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        update_selected(&mut state, None);
+        let changed = update_selected(&mut state, None);
         state.transforms.clear();
+        state.model_infos.clear();
+        changed
     });
+    if changed {
+        notify_selection_changed(None);
+    }
 }
 
 pub(crate) fn sync_api_state(
     selected: Option<u32>,
-    transforms: impl IntoIterator<Item = (u32, TransformSnapshot)>,
+    models: impl IntoIterator<Item = (u32, TransformSnapshot, ModelInfoSnapshot)>,
 ) {
-    API_STATE.with(|state| {
+    let changed = API_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        update_selected(&mut state, selected);
         state.transforms.clear();
-        state.transforms.extend(transforms);
+        state.model_infos.clear();
+        for (id, transform, info) in models {
+            state.transforms.insert(id, transform);
+            state.model_infos.insert(id, info);
+        }
+        update_selected(&mut state, selected)
     });
+    if changed {
+        notify_selection_changed(selected);
+    }
 }
 
-fn update_selected(state: &mut ApiState, selected: Option<u32>) {
+fn update_selected(state: &mut ApiState, selected: Option<u32>) -> bool {
     if state.selected == selected {
-        return;
+        return false;
     }
 
     state.selected = selected;
-    notify_selection_changed(selected);
+    true
 }
 
 fn notify_selection_changed(selected: Option<u32>) {
@@ -213,10 +251,41 @@ pub fn transform_json(id: u32) -> String {
     })
 }
 
+pub fn model_info_json(id: u32) -> String {
+    API_STATE.with(|state| {
+        state
+            .borrow()
+            .model_infos
+            .get(&id)
+            .map(ModelInfoSnapshot::to_json)
+            .unwrap_or_else(|| "null".to_string())
+    })
+}
+
 pub fn selected_model_id() -> u32 {
     API_STATE.with(|state| state.borrow().selected.unwrap_or(0))
 }
 
 pub fn last_error() -> String {
     API_STATE.with(|state| state.borrow().last_error.clone())
+}
+
+fn json_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len() + 2);
+    escaped.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                escaped.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped.push('"');
+    escaped
 }

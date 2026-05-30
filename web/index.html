@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -15,7 +15,8 @@
         touch-action: none;
         font-family:
           Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", sans-serif;
+          "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC",
+          sans-serif;
       }
 
       canvas {
@@ -134,6 +135,42 @@
         background: rgb(255 255 255 / 45%);
       }
 
+      .model-info-panel {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 9;
+        width: min(360px, calc(100vw - 32px));
+        box-sizing: border-box;
+        overflow: hidden;
+        padding: 10px 14px 10px 16px;
+        border: 1px solid rgb(66 226 126 / 42%);
+        border-radius: 6px;
+        background: rgb(18 22 24 / 88%);
+        color: #edf2ef;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-line;
+        box-shadow: 0 10px 26px rgb(0 0 0 / 32%);
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+      }
+
+      .model-info-panel::before {
+        position: absolute;
+        top: 8px;
+        bottom: 8px;
+        left: 6px;
+        width: 3px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #39e881, #10a35b);
+        content: "";
+      }
+
+      .model-info-panel[hidden] {
+        display: none;
+      }
+
       @media (max-width: 720px) {
         .toolbar-shell {
           justify-content: flex-start;
@@ -163,6 +200,13 @@
         .toolbar-divider {
           height: 42px;
           margin: 0 6px;
+        }
+
+        .model-info-panel {
+          right: 10px;
+          bottom: 10px;
+          width: calc(100vw - 20px);
+          font-size: 12px;
         }
 
       }
@@ -318,6 +362,8 @@
       </div>
     </div>
 
+    <div id="model-info-panel" class="model-info-panel" hidden></div>
+
     <script type="module">
       import init, {
         activate_move_tool_mode,
@@ -326,6 +372,7 @@
         center_model,
         clear_tool_mode,
         drop_model_to_platform,
+        get_model_info_json,
         load_obj_model,
         load_stl_model,
       } from "./pkg/bevy_transform_tools.js";
@@ -355,10 +402,12 @@
       const rotateButton = document.querySelector("#rotate-tool");
       const centerButton = document.querySelector("#center-model");
       const dropButton = document.querySelector("#drop-model");
+      const modelInfoPanel = document.querySelector("#model-info-panel");
       const selectionTools = document.querySelectorAll(
         "[data-requires-selection]",
       );
       let activeTool = null;
+      let lastModelInfoJson = "";
 
       importButton.addEventListener("click", () => {
         fileInput.click();
@@ -441,6 +490,47 @@
           setActiveToolButton(null);
         }
       };
+
+      const formatFixed = (value, digits) =>
+        Number.isFinite(value) ? value.toFixed(digits) : (0).toFixed(digits);
+
+      const updateModelInfoPanel = () => {
+        if (selectedModelId === 0) {
+          lastModelInfoJson = "";
+          modelInfoPanel.hidden = true;
+          modelInfoPanel.textContent = "";
+          return;
+        }
+
+        const infoJson = get_model_info_json(selectedModelId);
+        if (!infoJson || infoJson === "null") {
+          lastModelInfoJson = "";
+          modelInfoPanel.hidden = true;
+          modelInfoPanel.textContent = "";
+          return;
+        }
+
+        if (infoJson === lastModelInfoJson) {
+          return;
+        }
+        lastModelInfoJson = infoJson;
+
+        const info = JSON.parse(infoJson);
+        const [width = 0, depth = 0, height = 0] = info.size ?? [];
+        modelInfoPanel.textContent = [
+          `对象名字：${info.name ?? ""}`,
+          `大小： ${formatFixed(width, 3)} x ${formatFixed(depth, 3)} x ${formatFixed(height, 3)} 毫米`,
+          `体积： ${formatFixed(info.volume, 2)} 立方毫米`,
+          `三角形： ${info.triangle_count ?? 0}`,
+        ].join("\n");
+        modelInfoPanel.hidden = false;
+      };
+
+      const scheduleModelInfoRefresh = () => {
+        updateModelInfoPanel();
+        requestAnimationFrame(scheduleModelInfoRefresh);
+      };
+
       const setActiveToolButton = (tool) => {
         activeTool = tool;
         moveButton.classList.toggle("is-active", tool === "move");
@@ -454,9 +544,11 @@
         (event) => {
           selectedModelId = event.detail?.selectedModelId ?? 0;
           syncToolAvailability();
+          updateModelInfoPanel();
         },
       );
       syncToolAvailability();
+      scheduleModelInfoRefresh();
     </script>
   </body>
 </html>

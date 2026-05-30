@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::{
     mesh::{MeshBounds, MeshData},
-    state::{self, ModelCommand, TransformSnapshot},
+    state::{self, ModelCommand, ModelInfoSnapshot, TransformSnapshot},
 };
 
 use super::{
@@ -13,7 +13,10 @@ use super::{
 #[derive(Component)]
 pub(super) struct ImportedModel {
     pub(super) id: u32,
+    pub(super) name: String,
     pub(super) bounds: Option<MeshBounds>,
+    pub(super) triangle_count: usize,
+    pub(super) volume: f64,
 }
 
 #[derive(Resource, Default)]
@@ -113,6 +116,8 @@ fn spawn_imported_model(
         ..default()
     });
     let bounds = mesh.bounds();
+    let triangle_count = mesh.positions.len() / 3;
+    let volume = mesh.volume();
     let mut model_transform = transform.to_transform();
     if let Some(bounds) = bounds {
         center_model_on_platform(&mut model_transform, bounds.center);
@@ -123,8 +128,14 @@ fn spawn_imported_model(
             Mesh3d(meshes.add(mesh.into_mesh())),
             MeshMaterial3d(material),
             model_transform,
-            Name::new(name),
-            ImportedModel { id, bounds },
+            Name::new(name.clone()),
+            ImportedModel {
+                id,
+                name,
+                bounds,
+                triangle_count,
+                volume,
+            },
         ))
         .observe(select_model_on_click)
         .observe(start_model_drag);
@@ -136,9 +147,13 @@ pub(super) fn update_api_state_from_scene(
 ) {
     state::sync_api_state(
         selected.0,
-        models
-            .iter()
-            .map(|(model, transform)| (model.id, TransformSnapshot::from_transform(transform))),
+        models.iter().map(|(model, transform)| {
+            (
+                model.id,
+                TransformSnapshot::from_transform(transform),
+                model_info_snapshot(model, transform),
+            )
+        }),
     );
 }
 
@@ -186,4 +201,22 @@ fn transformed_bounds_min_y(bounds: MeshBounds, transform: &Transform) -> f32 {
         .into_iter()
         .map(|corner| transform.transform_point(corner).y)
         .fold(f32::INFINITY, f32::min)
+}
+
+fn model_info_snapshot(model: &ImportedModel, transform: &Transform) -> ModelInfoSnapshot {
+    let size = model
+        .bounds
+        .map(|bounds| bounds.size * transform.scale.abs())
+        .unwrap_or(Vec3::ZERO);
+    let volume = model.volume
+        * f64::from(transform.scale.x.abs())
+        * f64::from(transform.scale.y.abs())
+        * f64::from(transform.scale.z.abs());
+
+    ModelInfoSnapshot {
+        name: model.name.clone(),
+        size: size.to_array(),
+        volume,
+        triangle_count: model.triangle_count,
+    }
 }
