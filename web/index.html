@@ -312,6 +312,21 @@
         color: #ffffff;
       }
 
+      .panel-checkbox {
+        display: inline-flex;
+        gap: 7px;
+        align-items: center;
+        color: rgb(235 239 238 / 84%);
+        font-size: 13px;
+        user-select: none;
+      }
+
+      .panel-checkbox input {
+        width: 14px;
+        height: 14px;
+        accent-color: #24b96b;
+      }
+
       @media (max-width: 720px) {
         .toolbar-shell {
           justify-content: flex-start;
@@ -582,6 +597,32 @@
       </div>
     </div>
 
+    <div id="scale-panel" class="move-panel" hidden>
+      <div class="move-panel-grid">
+        <label class="panel-checkbox">
+          <input id="scale-uniform" type="checkbox" checked />
+          等比例缩放
+        </label>
+        <div class="move-axis-label move-axis-x">X</div>
+        <div class="move-axis-label move-axis-y">Y</div>
+        <div class="move-axis-label move-axis-z">Z</div>
+        <div></div>
+        <div></div>
+        <div class="move-row-label">缩放</div>
+        <input id="scale-x" class="move-number" type="number" step="0.01" />
+        <input id="scale-y" class="move-number" type="number" step="0.01" />
+        <input id="scale-z" class="move-number" type="number" step="0.01" />
+        <div class="move-unit">%</div>
+        <button id="scale-apply" class="move-apply" type="button">应用</button>
+        <div class="move-row-label">大小</div>
+        <input id="size-x" class="move-number" type="number" step="0.01" />
+        <input id="size-y" class="move-number" type="number" step="0.01" />
+        <input id="size-z" class="move-number" type="number" step="0.01" />
+        <div class="move-unit">mm</div>
+        <div></div>
+      </div>
+    </div>
+
     <div id="model-info-panel" class="model-info-panel" hidden></div>
 
     <script type="module">
@@ -602,6 +643,7 @@
         set_position,
         set_rotate_focus_axis,
         set_rotation,
+        set_scale,
       } from "./pkg/bevy_transform_tools.js";
 
       await init();
@@ -649,12 +691,23 @@
       const rotateApplyButton = document.querySelector("#rotate-apply");
       const rotateZeroButton = document.querySelector("#rotate-zero");
       const rotateCurrent = document.querySelector("#rotate-current");
+      const scalePanel = document.querySelector("#scale-panel");
+      const scaleXInput = document.querySelector("#scale-x");
+      const scaleYInput = document.querySelector("#scale-y");
+      const scaleZInput = document.querySelector("#scale-z");
+      const sizeXInput = document.querySelector("#size-x");
+      const sizeYInput = document.querySelector("#size-y");
+      const sizeZInput = document.querySelector("#size-z");
+      const scaleApplyButton = document.querySelector("#scale-apply");
+      const scaleUniformInput = document.querySelector("#scale-uniform");
       const modelInfoPanel = document.querySelector("#model-info-panel");
       const selectionTools = document.querySelectorAll(
         "[data-requires-selection]",
       );
       let activeTool = null;
       let lastModelInfoJson = "";
+      let scaleBaseSize = [0, 0, 0];
+      let isSyncingScalePanel = false;
 
       importButton.addEventListener("click", () => {
         fileInput.click();
@@ -715,6 +768,7 @@
         } else {
           activate_scale_tool_mode();
           setActiveToolButton("scale");
+          syncScalePanelFromSelection();
         }
       });
 
@@ -804,6 +858,40 @@
         });
       });
 
+      scaleApplyButton.addEventListener("click", () => {
+        applyScalePanelValues();
+      });
+
+      scaleUniformInput.addEventListener("change", () => {
+        if (scaleUniformInput.checked) {
+          syncLinkedScaleInputs(scaleXInput, 0);
+        }
+      });
+
+      const scaleInputs = [
+        scaleXInput,
+        scaleYInput,
+        scaleZInput,
+        sizeXInput,
+        sizeYInput,
+        sizeZInput,
+      ];
+      scaleInputs.forEach((input, index) => {
+        input.addEventListener("input", () => {
+          syncLinkedScaleInputs(input, index);
+        });
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            applyScalePanelValues();
+          }
+        });
+        input.addEventListener("blur", () => {
+          const percents = readScalePercents();
+          writeScalePercents(percents);
+          writeScaleSizes(sizesFromScalePercents(percents));
+        });
+      });
+
       const syncToolAvailability = () => {
         const hasSelection = selectedModelId !== 0;
         for (const button of selectionTools) {
@@ -855,6 +943,27 @@
       const selectedRotation = () => {
         const transform = getSelectedTransform();
         return (transform?.rotation_degrees ?? [0, 0, 0]).map(normalizeDegrees);
+      };
+
+      const selectedScalePercent = () => {
+        const transform = getSelectedTransform();
+        const [x = 1, y = 1, z = 1] = transform?.scale ?? [1, 1, 1];
+        return [x * 100, z * 100, y * 100];
+      };
+
+      const selectedModelSize = () => {
+        if (selectedModelId === 0) {
+          return [0, 0, 0];
+        }
+
+        const infoJson = get_model_info_json(selectedModelId);
+        if (!infoJson || infoJson === "null") {
+          return [0, 0, 0];
+        }
+
+        const info = JSON.parse(infoJson);
+        const [x = 0, y = 0, z = 0] = info.size ?? [0, 0, 0];
+        return [x, z, y];
       };
 
       const normalizeDegrees = (value) => {
@@ -993,6 +1102,116 @@
         }
       };
 
+      const scalePercentInputs = [scaleXInput, scaleYInput, scaleZInput];
+      const scaleSizeInputs = [sizeXInput, sizeYInput, sizeZInput];
+
+      const readScalePercents = () =>
+        scalePercentInputs.map((input) =>
+          Math.max(parseNumberInput(input), 0.01),
+        );
+
+      const writeScalePercents = (values, skipInput = null) => {
+        scalePercentInputs.forEach((input, index) => {
+          if (input === skipInput) {
+            return;
+          }
+          input.value = formatFixed(values[index], 2);
+        });
+      };
+
+      const writeScaleSizes = (values, skipInput = null) => {
+        scaleSizeInputs.forEach((input, index) => {
+          if (input === skipInput) {
+            return;
+          }
+          input.value = formatFixed(values[index], 2);
+        });
+      };
+
+      const sizesFromScalePercents = (percents) =>
+        percents.map((percent, index) => scaleBaseSize[index] * (percent / 100));
+
+      const syncScalePanelFromSelection = (force = false) => {
+        const visible = activeTool === "scale" && selectedModelId !== 0;
+        scalePanel.hidden = !visible;
+        if (!visible) {
+          return;
+        }
+
+        const percents = selectedScalePercent();
+        const sizes = selectedModelSize();
+        const baseSize = sizes.map((size, index) => {
+          const scale = percents[index] / 100;
+          return Math.abs(scale) > 0.0001 ? size / scale : size;
+        });
+        const isEditing = scalePanel.contains(document.activeElement);
+
+        if (force || !isEditing || scaleBaseSize.every((size) => size === 0)) {
+          scaleBaseSize = baseSize;
+        }
+
+        if (!force && isEditing) {
+          return;
+        }
+
+        isSyncingScalePanel = true;
+        writeScalePercents(percents);
+        writeScaleSizes(sizes);
+        isSyncingScalePanel = false;
+      };
+
+      const syncLinkedScaleInputs = (input, index) => {
+        if (isSyncingScalePanel) {
+          return;
+        }
+
+        isSyncingScalePanel = true;
+        let percents = readScalePercents();
+
+        if (index < 3) {
+          const percent = Math.max(parseNumberInput(input), 0.01);
+          if (scaleUniformInput.checked) {
+            percents = [percent, percent, percent];
+            writeScalePercents(percents, input);
+          }
+          writeScaleSizes(sizesFromScalePercents(percents));
+        } else {
+          const sizeAxis = index - 3;
+          const targetSize = Math.max(parseNumberInput(input), 0);
+
+          if (scaleUniformInput.checked) {
+            const currentSizes = sizesFromScalePercents(percents);
+            const currentSize = currentSizes[sizeAxis];
+            const factor = currentSize > 0 ? targetSize / currentSize : 1;
+            percents = percents.map((percent) =>
+              Math.max(percent * factor, 0.01),
+            );
+            writeScalePercents(percents);
+            writeScaleSizes(sizesFromScalePercents(percents), input);
+          } else {
+            const baseSize = scaleBaseSize[sizeAxis];
+            percents[sizeAxis] =
+              baseSize > 0 ? Math.max((targetSize / baseSize) * 100, 0.01) : 0.01;
+            writeScalePercents(percents);
+            writeScaleSizes(sizesFromScalePercents(percents), input);
+          }
+        }
+
+        isSyncingScalePanel = false;
+      };
+
+      const applyScalePanelValues = () => {
+        if (selectedModelId === 0) {
+          return;
+        }
+
+        const [x, y, z] = readScalePercents();
+        const sizes = sizesFromScalePercents([x, y, z]);
+        set_scale(selectedModelId, x / 100, z / 100, y / 100);
+        writeScalePercents([x, y, z]);
+        writeScaleSizes(sizes);
+      };
+
       const updateModelInfoPanel = () => {
         if (selectedModelId === 0) {
           lastModelInfoJson = "";
@@ -1029,6 +1248,7 @@
         updateModelInfoPanel();
         syncMovePanelFromSelection();
         syncRotatePanelFromSelection();
+        syncScalePanelFromSelection();
         requestAnimationFrame(scheduleModelInfoRefresh);
       };
 
@@ -1039,6 +1259,7 @@
         rotateButton.classList.toggle("is-active", tool === "rotate");
         syncMovePanelFromSelection(true);
         syncRotatePanelFromSelection(true);
+        syncScalePanelFromSelection(true);
       };
       let selectedModelId = 0;
 

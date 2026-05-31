@@ -42,6 +42,10 @@ pub(crate) enum ModelCommand {
         id: u32,
         delta_degrees: [f32; 3],
     },
+    SetScale {
+        id: u32,
+        scale: [f32; 3],
+    },
     CenterOnOrigin(u32),
     DropToBuildPlate(u32),
     SetActiveTool(ToolModeSpec),

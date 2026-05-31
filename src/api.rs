@@ -90,6 +90,13 @@ pub fn set_rotation_focus_axis(axis: i32) {
     state::set_rotation_focus_axis(usize::try_from(axis).ok());
 }
 
+pub fn set_model_scale(id: u32, x: f32, y: f32, z: f32) {
+    push_command(ModelCommand::SetScale {
+        id,
+        scale: [x, y, z].map(sanitize_scale_component),
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn set_model_transform(
     id: u32,
@@ -124,6 +131,14 @@ fn sanitize_color_channel(value: f32) -> f32 {
 
 fn sanitize_position_component(value: f32) -> f32 {
     if value.is_finite() { value } else { 0.0 }
+}
+
+fn sanitize_scale_component(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.001, 1000.0)
+    } else {
+        1.0
+    }
 }
 
 fn queue_mesh_model(name: String, mesh: MeshData) -> Result<u32, String> {
@@ -228,6 +243,11 @@ mod wasm {
     #[wasm_bindgen]
     pub fn set_rotate_focus_axis(axis: i32) {
         set_rotation_focus_axis(axis);
+    }
+
+    #[wasm_bindgen]
+    pub fn set_scale(id: u32, x: f32, y: f32, z: f32) {
+        set_model_scale(id, x, y, z);
     }
 
     #[wasm_bindgen]

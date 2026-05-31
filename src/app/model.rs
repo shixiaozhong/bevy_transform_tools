@@ -123,6 +123,14 @@ pub(super) fn apply_model_commands(
                     }
                 }
             }
+            ModelCommand::SetScale { id, scale } => {
+                for (_, model, mut model_transform, _) in &mut models {
+                    if model.id == id {
+                        set_model_scale(model, &mut model_transform, Vec3::from_array(scale));
+                        break;
+                    }
+                }
+            }
             ModelCommand::CenterOnOrigin(id) => {
                 for (_, model, mut model_transform, _) in &mut models {
                     if model.id == id {
@@ -252,6 +260,12 @@ fn drop_model_to_build_plate(model: &ImportedModel, transform: &mut Transform) {
 fn set_model_rotation(model: &ImportedModel, transform: &mut Transform, rotation: Quat) {
     let center = model_visual_center(model, transform);
     transform.rotation = rotation.normalize();
+    recenter_model_visual_center(model, transform, center);
+}
+
+fn set_model_scale(model: &ImportedModel, transform: &mut Transform, scale: Vec3) {
+    let center = model_visual_center(model, transform);
+    transform.scale = scale;
     recenter_model_visual_center(model, transform, center);
 }
 
