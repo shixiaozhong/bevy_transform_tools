@@ -58,6 +58,20 @@ pub fn set_model_color(id: u32, red: f32, green: f32, blue: f32) {
     });
 }
 
+pub fn set_model_position(id: u32, x: f32, y: f32, z: f32) {
+    push_command(ModelCommand::SetTranslation {
+        id,
+        translation: [x, y, z].map(sanitize_position_component),
+    });
+}
+
+pub fn move_model_by(id: u32, x: f32, y: f32, z: f32) {
+    push_command(ModelCommand::TranslateBy {
+        id,
+        delta: [x, y, z].map(sanitize_position_component),
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn set_model_transform(
     id: u32,
@@ -88,6 +102,10 @@ fn sanitize_color_channel(value: f32) -> f32 {
     } else {
         0.0
     }
+}
+
+fn sanitize_position_component(value: f32) -> f32 {
+    if value.is_finite() { value } else { 0.0 }
 }
 
 fn queue_mesh_model(name: String, mesh: MeshData) -> Result<u32, String> {
@@ -167,6 +185,16 @@ mod wasm {
     #[wasm_bindgen]
     pub fn set_color(id: u32, red: f32, green: f32, blue: f32) {
         set_model_color(id, red, green, blue);
+    }
+
+    #[wasm_bindgen]
+    pub fn set_position(id: u32, x: f32, y: f32, z: f32) {
+        set_model_position(id, x, y, z);
+    }
+
+    #[wasm_bindgen]
+    pub fn move_by(id: u32, x: f32, y: f32, z: f32) {
+        move_model_by(id, x, y, z);
     }
 
     #[wasm_bindgen]

@@ -181,6 +181,137 @@
         display: none;
       }
 
+      .move-panel {
+        position: fixed;
+        top: 82px;
+        left: 50%;
+        z-index: 9;
+        width: min(660px, calc(100vw - 28px));
+        box-sizing: border-box;
+        padding: 12px 16px 14px;
+        border: 1px solid rgb(255 255 255 / 7%);
+        border-top: 0;
+        border-radius: 0 0 10px 10px;
+        background: rgb(45 52 49 / 92%);
+        color: #d9dddc;
+        box-shadow: 0 14px 28px rgb(0 0 0 / 34%);
+        backdrop-filter: blur(10px);
+        transform: translateX(-50%);
+        pointer-events: auto;
+      }
+
+      .move-panel[hidden] {
+        display: none;
+      }
+
+      .move-panel-grid {
+        display: grid;
+        grid-template-columns: 120px repeat(3, minmax(96px, 1fr)) 36px 72px;
+        gap: 8px 12px;
+        align-items: center;
+      }
+
+      .move-mode-select,
+      .move-number {
+        height: 30px;
+        box-sizing: border-box;
+        border: 1px solid rgb(255 255 255 / 20%);
+        border-radius: 5px;
+        background: rgb(255 255 255 / 9%);
+        color: #f2f5f4;
+        font: inherit;
+      }
+
+      .move-mode-select {
+        width: 120px;
+        padding: 0 8px;
+      }
+
+      .move-mode-select option {
+        background: #2d3431;
+        color: #f2f5f4;
+      }
+
+      .move-number {
+        width: 100%;
+        padding: 0 8px;
+      }
+
+      .move-mode-select:focus,
+      .move-number:focus {
+        outline: none;
+        border-color: rgb(255 255 255 / 42%);
+        background: rgb(255 255 255 / 13%);
+      }
+
+      .move-axis-label {
+        font-size: 14px;
+        line-height: 18px;
+        text-align: center;
+      }
+
+      .move-axis-x {
+        color: #cc6969;
+      }
+
+      .move-axis-y {
+        color: #6fc277;
+      }
+
+      .move-axis-z {
+        color: #7b82cc;
+      }
+
+      .move-row-label,
+      .move-unit {
+        color: rgb(235 239 238 / 78%);
+        font-size: 14px;
+      }
+
+      .move-apply {
+        height: 30px;
+        border: 1px solid rgb(65 226 126 / 50%);
+        border-radius: 5px;
+        background: rgb(36 185 107 / 88%);
+        color: #ffffff;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .move-apply:hover,
+      .move-apply:focus-visible {
+        outline: none;
+        background: rgb(42 205 121 / 94%);
+      }
+
+      .move-secondary {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        min-height: 28px;
+        padding-top: 6px;
+        border-top: 1px solid rgb(255 255 255 / 10%);
+      }
+
+      .move-chip {
+        height: 24px;
+        padding: 0 9px;
+        border: 1px solid rgb(255 255 255 / 16%);
+        border-radius: 5px;
+        background: rgb(255 255 255 / 8%);
+        color: rgb(235 239 238 / 82%);
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .move-chip:hover,
+      .move-chip:focus-visible {
+        outline: none;
+        background: rgb(255 255 255 / 13%);
+        color: #ffffff;
+      }
+
       @media (max-width: 720px) {
         .toolbar-shell {
           justify-content: flex-start;
@@ -217,6 +348,24 @@
           bottom: 10px;
           width: calc(100vw - 20px);
           font-size: 12px;
+        }
+
+        .move-panel {
+          top: 68px;
+          padding: 9px 10px 11px;
+        }
+
+        .move-panel-grid {
+          grid-template-columns: 88px repeat(3, minmax(64px, 1fr)) 28px;
+          gap: 7px;
+        }
+
+        .move-mode-select {
+          width: 88px;
+        }
+
+        .move-apply {
+          grid-column: 1 / -1;
         }
 
       }
@@ -385,6 +534,30 @@
       </div>
     </div>
 
+    <div id="move-panel" class="move-panel" hidden>
+      <div class="move-panel-grid">
+        <select id="move-mode" class="move-mode-select" aria-label="移动方式">
+          <option value="absolute">绝对坐标</option>
+          <option value="relative">相对移动</option>
+        </select>
+        <div class="move-axis-label move-axis-x">X</div>
+        <div class="move-axis-label move-axis-y">Y</div>
+        <div class="move-axis-label move-axis-z">Z</div>
+        <div></div>
+        <div></div>
+        <div id="move-value-label" class="move-row-label">位置</div>
+        <input id="move-x" class="move-number" type="number" step="0.01" />
+        <input id="move-y" class="move-number" type="number" step="0.01" />
+        <input id="move-z" class="move-number" type="number" step="0.01" />
+        <div class="move-unit">mm</div>
+        <button id="move-apply" class="move-apply" type="button">应用</button>
+        <div class="move-secondary">
+          <button id="move-zero" class="move-chip" type="button">清零</button>
+          <span id="move-current" class="move-row-label"></span>
+        </div>
+      </div>
+    </div>
+
     <div id="model-info-panel" class="model-info-panel" hidden></div>
 
     <script type="module">
@@ -396,9 +569,12 @@
         clear_tool_mode,
         drop_model_to_platform,
         get_model_info_json,
+        get_model_transform_json,
         load_obj_model,
         load_stl_model,
+        move_by,
         set_color,
+        set_position,
       } from "./pkg/bevy_transform_tools.js";
 
       await init();
@@ -428,6 +604,15 @@
       const colorInput = document.querySelector("#model-color");
       const centerButton = document.querySelector("#center-model");
       const dropButton = document.querySelector("#drop-model");
+      const movePanel = document.querySelector("#move-panel");
+      const moveModeSelect = document.querySelector("#move-mode");
+      const moveValueLabel = document.querySelector("#move-value-label");
+      const moveXInput = document.querySelector("#move-x");
+      const moveYInput = document.querySelector("#move-y");
+      const moveZInput = document.querySelector("#move-z");
+      const moveApplyButton = document.querySelector("#move-apply");
+      const moveZeroButton = document.querySelector("#move-zero");
+      const moveCurrent = document.querySelector("#move-current");
       const modelInfoPanel = document.querySelector("#model-info-panel");
       const selectionTools = document.querySelectorAll(
         "[data-requires-selection]",
@@ -464,6 +649,7 @@
         } else {
           activate_move_tool_mode();
           setActiveToolButton("move");
+          syncMovePanelFromSelection();
         }
       });
 
@@ -526,6 +712,28 @@
         }
       });
 
+      moveModeSelect.addEventListener("change", () => {
+        syncMovePanelFromSelection(true);
+      });
+
+      moveApplyButton.addEventListener("click", () => {
+        applyMovePanelValues();
+      });
+
+      moveZeroButton.addEventListener("click", () => {
+        moveXInput.value = "0.00";
+        moveYInput.value = "0.00";
+        moveZInput.value = "0.00";
+      });
+
+      for (const input of [moveXInput, moveYInput, moveZInput]) {
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            applyMovePanelValues();
+          }
+        });
+      }
+
       const syncToolAvailability = () => {
         const hasSelection = selectedModelId !== 0;
         for (const button of selectionTools) {
@@ -547,6 +755,105 @@
           green: ((number >> 8) & 0xff) / 255,
           blue: (number & 0xff) / 255,
         };
+      };
+
+      const parseNumberInput = (input) => {
+        const value = Number.parseFloat(input.value);
+        return Number.isFinite(value) ? value : 0;
+      };
+
+      const getSelectedTransform = () => {
+        if (selectedModelId === 0) {
+          return null;
+        }
+
+        const transformJson = get_model_transform_json(selectedModelId);
+        if (!transformJson || transformJson === "null") {
+          return null;
+        }
+
+        return JSON.parse(transformJson);
+      };
+
+      const selectedTranslation = () => {
+        const transform = getSelectedTransform();
+        return worldToPlatformPosition(
+          transform?.visual_position ?? transform?.translation ?? [0, 0, 0],
+        );
+      };
+
+      const worldToPlatformPosition = ([x = 0, y = 0, z = 0]) => [
+        x,
+        -z,
+        y,
+      ];
+
+      const platformToWorldPosition = ([x = 0, y = 0, z = 0]) => [x, z, -y];
+
+      const platformToWorldDelta = ([x = 0, y = 0, z = 0]) => [x, z, -y];
+
+      const applyWorldPosition = (id, platformPosition) => {
+        const [x, y, z] = platformToWorldPosition(platformPosition);
+        set_position(id, x, y, z);
+      };
+
+      const applyWorldDelta = (id, platformDelta) => {
+        const [x, y, z] = platformToWorldDelta(platformDelta);
+        move_by(id, x, y, z);
+      };
+
+      const syncMovePanelFromSelection = (force = false) => {
+        const visible = activeTool === "move" && selectedModelId !== 0;
+        movePanel.hidden = !visible;
+        if (!visible) {
+          return;
+        }
+
+        const isEditing = movePanel.contains(document.activeElement);
+        const isRelative = moveModeSelect.value === "relative";
+        moveValueLabel.textContent = isRelative ? "偏移" : "位置";
+
+        const [x, y, z] = selectedTranslation();
+        moveCurrent.textContent = `当前位置：${formatFixed(x, 2)}, ${formatFixed(y, 2)}, ${formatFixed(z, 2)} mm`;
+
+        if (!force && isEditing) {
+          return;
+        }
+
+        if (isRelative) {
+          moveXInput.value = "0.00";
+          moveYInput.value = "0.00";
+          moveZInput.value = "0.00";
+        } else {
+          moveXInput.value = formatFixed(x, 2);
+          moveYInput.value = formatFixed(y, 2);
+          moveZInput.value = formatFixed(z, 2);
+        }
+      };
+
+      const applyMovePanelValues = () => {
+        if (selectedModelId === 0) {
+          return;
+        }
+
+        const x = parseNumberInput(moveXInput);
+        const y = parseNumberInput(moveYInput);
+        const z = parseNumberInput(moveZInput);
+
+        if (moveModeSelect.value === "relative") {
+          const [currentX, currentY, currentZ] = selectedTranslation();
+          applyWorldDelta(selectedModelId, [x, y, z]);
+          moveXInput.value = "0.00";
+          moveYInput.value = "0.00";
+          moveZInput.value = "0.00";
+          moveCurrent.textContent = `当前位置：${formatFixed(currentX + x, 2)}, ${formatFixed(currentY + y, 2)}, ${formatFixed(currentZ + z, 2)} mm`;
+        } else {
+          applyWorldPosition(selectedModelId, [x, y, z]);
+          moveXInput.value = formatFixed(x, 2);
+          moveYInput.value = formatFixed(y, 2);
+          moveZInput.value = formatFixed(z, 2);
+          moveCurrent.textContent = `当前位置：${formatFixed(x, 2)}, ${formatFixed(y, 2)}, ${formatFixed(z, 2)} mm`;
+        }
       };
 
       const updateModelInfoPanel = () => {
@@ -583,6 +890,7 @@
 
       const scheduleModelInfoRefresh = () => {
         updateModelInfoPanel();
+        syncMovePanelFromSelection();
         requestAnimationFrame(scheduleModelInfoRefresh);
       };
 
@@ -591,6 +899,7 @@
         moveButton.classList.toggle("is-active", tool === "move");
         scaleButton.classList.toggle("is-active", tool === "scale");
         rotateButton.classList.toggle("is-active", tool === "rotate");
+        syncMovePanelFromSelection(true);
       };
       let selectedModelId = 0;
 

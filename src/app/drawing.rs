@@ -678,20 +678,18 @@ fn draw_selected_model_tools(
 fn draw_move_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Transform) {
     let origin = model_visual_center(model, transform);
     let length = move_gizmo_length(model, transform);
-    let x_color = Color::srgb(0.95, 0.05, 0.04);
-    let y_color = Color::srgb(0.05, 0.75, 0.12);
-    let z_color = Color::srgb(0.04, 0.16, 0.95);
 
-    gizmos.arrow(origin, origin + Vec3::X * length, x_color);
-    gizmos.arrow(origin, origin + Vec3::Y * length, y_color);
-    gizmos.arrow(origin, origin + Vec3::Z * length, z_color);
+    for (print_axis, color) in print_axis_colors() {
+        let world_axis = print_axis_to_world(print_axis);
+        gizmos.arrow(origin, origin + world_axis * length, color);
+    }
     gizmos.sphere(origin, 0.07 * length, Color::srgb(0.08, 0.52, 0.48));
 }
 
 fn draw_scale_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Transform) {
     let (min, max) = scale_gizmo_bounds(model, transform);
     let bottom_y = min.y;
-    let red = Color::srgb(0.95, 0.05, 0.04);
+    let red = axis_x_color();
 
     let base_corners = [
         Vec3::new(min.x, bottom_y, min.z),
@@ -765,9 +763,9 @@ fn scale_handle_visual_layout(model: &ImportedModel, transform: &Transform) -> [
     let center = (min + max) * 0.5;
     let bottom_y = min.y;
     let top_y = max.y;
-    let red = Color::srgb(0.95, 0.05, 0.04);
-    let green = Color::srgb(0.05, 0.78, 0.12);
-    let blue = Color::srgb(0.04, 0.16, 0.95);
+    let red = axis_x_color();
+    let green = axis_y_color();
+    let blue = axis_z_color();
     let cyan = Color::srgb(0.0, 0.78, 0.82);
 
     [
@@ -793,13 +791,8 @@ fn draw_rotate_gizmo(
     let origin = model_visual_center(model, transform);
     let radius = rotate_gizmo_radius(model, transform);
     let focused_axis = active_rotation.map(|(axis, _)| axis).or(hovered_axis);
-    let axes = [
-        (Vec3::X, Color::srgb(0.95, 0.05, 0.04)),
-        (Vec3::Y, Color::srgb(0.05, 0.78, 0.12)),
-        (Vec3::Z, Color::srgb(0.04, 0.16, 0.95)),
-    ];
 
-    for (print_axis, color) in axes {
+    for (print_axis, color) in print_axis_colors() {
         let world_axis = print_axis_to_world(print_axis);
         if focused_axis.is_some_and(|axis| axis != world_axis) {
             continue;
@@ -981,11 +974,7 @@ fn draw_ground_grid(gizmos: &mut Gizmos) {
 }
 
 fn draw_orientation_axes(gizmos: &mut Gizmos<OrientationGizmos>) {
-    for (axis, color) in [
-        (Vec3::X, Color::srgb(0.80, 0.42, 0.42)),
-        (Vec3::Y, Color::srgb(0.44, 0.76, 0.47)),
-        (Vec3::Z, Color::srgb(0.48, 0.51, 0.80)),
-    ] {
+    for (axis, color) in print_axis_colors() {
         let axis_origin = print_axis_to_world(ORIENTATION_AXIS_CORNER);
         let axis_end = axis_origin + print_axis_to_world(axis) * ORIENTATION_AXIS_LENGTH;
         gizmos.arrow(axis_origin, axis_end, color);
@@ -995,6 +984,26 @@ fn draw_orientation_axes(gizmos: &mut Gizmos<OrientationGizmos>) {
         0.062,
         Color::srgb(0.92, 0.94, 0.96),
     );
+}
+
+fn print_axis_colors() -> [(Vec3, Color); 3] {
+    [
+        (Vec3::X, axis_x_color()),
+        (Vec3::Y, axis_y_color()),
+        (Vec3::Z, axis_z_color()),
+    ]
+}
+
+fn axis_x_color() -> Color {
+    Color::srgb(204.0 / 255.0, 105.0 / 255.0, 105.0 / 255.0)
+}
+
+fn axis_y_color() -> Color {
+    Color::srgb(111.0 / 255.0, 194.0 / 255.0, 119.0 / 255.0)
+}
+
+fn axis_z_color() -> Color {
+    Color::srgb(123.0 / 255.0, 130.0 / 255.0, 204.0 / 255.0)
 }
 
 fn update_orientation_axis_label_transforms(

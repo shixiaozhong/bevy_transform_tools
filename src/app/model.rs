@@ -80,6 +80,24 @@ pub(super) fn apply_model_commands(
                     }
                 }
             }
+            ModelCommand::SetTranslation { id, translation } => {
+                for (_, model, mut model_transform, _) in &mut models {
+                    if model.id == id {
+                        let desired_center = Vec3::from_array(translation);
+                        let current_center = model_visual_center(model, &model_transform);
+                        model_transform.translation += desired_center - current_center;
+                        break;
+                    }
+                }
+            }
+            ModelCommand::TranslateBy { id, delta } => {
+                for (_, model, mut model_transform, _) in &mut models {
+                    if model.id == id {
+                        model_transform.translation += Vec3::from_array(delta);
+                        break;
+                    }
+                }
+            }
             ModelCommand::CenterOnOrigin(id) => {
                 for (_, model, mut model_transform, _) in &mut models {
                     if model.id == id {
@@ -168,7 +186,10 @@ pub(super) fn update_api_state_from_scene(
         models.iter().map(|(model, transform)| {
             (
                 model.id,
-                TransformSnapshot::from_transform(transform),
+                TransformSnapshot::from_transform_with_visual_position(
+                    transform,
+                    model_visual_center(model, transform),
+                ),
                 model_info_snapshot(model, transform),
             )
         }),

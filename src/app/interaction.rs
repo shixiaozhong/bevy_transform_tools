@@ -493,7 +493,11 @@ fn pick_move_gizmo_axis(
     length: f32,
     start_translation: Vec3,
 ) -> Option<GizmoDragState> {
-    let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+    let axes = [
+        print_axis_to_world(Vec3::X),
+        print_axis_to_world(Vec3::Y),
+        print_axis_to_world(Vec3::Z),
+    ];
     let mut best = None::<(f32, GizmoDragState)>;
 
     for axis in axes {

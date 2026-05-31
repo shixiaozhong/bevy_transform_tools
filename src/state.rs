@@ -25,6 +25,14 @@ pub(crate) enum ModelCommand {
         id: u32,
         color: [f32; 3],
     },
+    SetTranslation {
+        id: u32,
+        translation: [f32; 3],
+    },
+    TranslateBy {
+        id: u32,
+        delta: [f32; 3],
+    },
     CenterOnOrigin(u32),
     DropToBuildPlate(u32),
     SetActiveTool(ToolModeSpec),
@@ -76,14 +84,23 @@ impl TransformSpec {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TransformSnapshot {
     translation: [f32; 3],
+    visual_position: [f32; 3],
     rotation_xyzw: [f32; 4],
     scale: [f32; 3],
 }
 
 impl TransformSnapshot {
     pub(crate) fn from_transform(transform: &Transform) -> Self {
+        Self::from_transform_with_visual_position(transform, transform.translation)
+    }
+
+    pub(crate) fn from_transform_with_visual_position(
+        transform: &Transform,
+        visual_position: Vec3,
+    ) -> Self {
         Self {
             translation: transform.translation.to_array(),
+            visual_position: visual_position.to_array(),
             rotation_xyzw: transform.rotation.to_array(),
             scale: transform.scale.to_array(),
         }
@@ -91,10 +108,13 @@ impl TransformSnapshot {
 
     fn to_json(self) -> String {
         format!(
-            "{{\"translation\":[{},{},{}],\"rotation_xyzw\":[{},{},{},{}],\"scale\":[{},{},{}]}}",
+            "{{\"translation\":[{},{},{}],\"visual_position\":[{},{},{}],\"rotation_xyzw\":[{},{},{},{}],\"scale\":[{},{},{}]}}",
             self.translation[0],
             self.translation[1],
             self.translation[2],
+            self.visual_position[0],
+            self.visual_position[1],
+            self.visual_position[2],
             self.rotation_xyzw[0],
             self.rotation_xyzw[1],
             self.rotation_xyzw[2],
