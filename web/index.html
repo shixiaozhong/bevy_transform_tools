@@ -558,6 +558,30 @@
       </div>
     </div>
 
+    <div id="rotate-panel" class="move-panel" hidden>
+      <div class="move-panel-grid">
+        <select id="rotate-mode" class="move-mode-select" aria-label="旋转方式">
+          <option value="absolute">绝对角度</option>
+          <option value="relative">相对旋转</option>
+        </select>
+        <div class="move-axis-label move-axis-x">X</div>
+        <div class="move-axis-label move-axis-y">Y</div>
+        <div class="move-axis-label move-axis-z">Z</div>
+        <div></div>
+        <div></div>
+        <div id="rotate-value-label" class="move-row-label">角度</div>
+        <input id="rotate-x" class="move-number" type="number" step="1" />
+        <input id="rotate-y" class="move-number" type="number" step="1" />
+        <input id="rotate-z" class="move-number" type="number" step="1" />
+        <div class="move-unit">°</div>
+        <button id="rotate-apply" class="move-apply" type="button">应用</button>
+        <div class="move-secondary">
+          <button id="rotate-zero" class="move-chip" type="button">清零</button>
+          <span id="rotate-current" class="move-row-label"></span>
+        </div>
+      </div>
+    </div>
+
     <div id="model-info-panel" class="model-info-panel" hidden></div>
 
     <script type="module">
@@ -573,8 +597,11 @@
         load_obj_model,
         load_stl_model,
         move_by,
+        rotate_by_degrees,
         set_color,
         set_position,
+        set_rotate_focus_axis,
+        set_rotation,
       } from "./pkg/bevy_transform_tools.js";
 
       await init();
@@ -613,6 +640,15 @@
       const moveApplyButton = document.querySelector("#move-apply");
       const moveZeroButton = document.querySelector("#move-zero");
       const moveCurrent = document.querySelector("#move-current");
+      const rotatePanel = document.querySelector("#rotate-panel");
+      const rotateModeSelect = document.querySelector("#rotate-mode");
+      const rotateValueLabel = document.querySelector("#rotate-value-label");
+      const rotateXInput = document.querySelector("#rotate-x");
+      const rotateYInput = document.querySelector("#rotate-y");
+      const rotateZInput = document.querySelector("#rotate-z");
+      const rotateApplyButton = document.querySelector("#rotate-apply");
+      const rotateZeroButton = document.querySelector("#rotate-zero");
+      const rotateCurrent = document.querySelector("#rotate-current");
       const modelInfoPanel = document.querySelector("#model-info-panel");
       const selectionTools = document.querySelectorAll(
         "[data-requires-selection]",
@@ -664,6 +700,7 @@
         } else {
           activate_rotate_tool_mode();
           setActiveToolButton("rotate");
+          syncRotatePanelFromSelection();
         }
       });
 
@@ -734,6 +771,39 @@
         });
       }
 
+      rotateModeSelect.addEventListener("change", () => {
+        syncRotatePanelFromSelection(true);
+      });
+
+      rotateApplyButton.addEventListener("click", () => {
+        applyRotatePanelValues();
+      });
+
+      rotateZeroButton.addEventListener("click", () => {
+        rotateXInput.value = "0.00";
+        rotateYInput.value = "0.00";
+        rotateZInput.value = "0.00";
+      });
+
+      const rotateInputs = [rotateXInput, rotateYInput, rotateZInput];
+      rotateInputs.forEach((input, axis) => {
+        input.addEventListener("focus", () => {
+          set_rotate_focus_axis(axis);
+        });
+        input.addEventListener("blur", () => {
+          setTimeout(() => {
+            if (!rotateInputs.includes(document.activeElement)) {
+              set_rotate_focus_axis(-1);
+            }
+          }, 0);
+        });
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            applyRotatePanelValues();
+          }
+        });
+      });
+
       const syncToolAvailability = () => {
         const hasSelection = selectedModelId !== 0;
         for (const button of selectionTools) {
@@ -780,6 +850,18 @@
         return worldToPlatformPosition(
           transform?.visual_position ?? transform?.translation ?? [0, 0, 0],
         );
+      };
+
+      const selectedRotation = () => {
+        const transform = getSelectedTransform();
+        return (transform?.rotation_degrees ?? [0, 0, 0]).map(normalizeDegrees);
+      };
+
+      const normalizeDegrees = (value) => {
+        if (!Number.isFinite(value)) {
+          return 0;
+        }
+        return ((((value + 180) % 360) + 360) % 360) - 180;
       };
 
       const worldToPlatformPosition = ([x = 0, y = 0, z = 0]) => [
@@ -856,6 +938,61 @@
         }
       };
 
+      const syncRotatePanelFromSelection = (force = false) => {
+        const visible = activeTool === "rotate" && selectedModelId !== 0;
+        rotatePanel.hidden = !visible;
+        if (!visible) {
+          set_rotate_focus_axis(-1);
+          return;
+        }
+
+        const isEditing = rotatePanel.contains(document.activeElement);
+        const isRelative = rotateModeSelect.value === "relative";
+        rotateValueLabel.textContent = isRelative ? "增量" : "角度";
+
+        const [x, y, z] = selectedRotation();
+        rotateCurrent.textContent = `当前角度：${formatFixed(x, 2)}, ${formatFixed(y, 2)}, ${formatFixed(z, 2)}°`;
+
+        if (!force && isEditing) {
+          return;
+        }
+
+        if (isRelative) {
+          rotateXInput.value = "0.00";
+          rotateYInput.value = "0.00";
+          rotateZInput.value = "0.00";
+        } else {
+          rotateXInput.value = formatFixed(x, 2);
+          rotateYInput.value = formatFixed(y, 2);
+          rotateZInput.value = formatFixed(z, 2);
+        }
+      };
+
+      const applyRotatePanelValues = () => {
+        if (selectedModelId === 0) {
+          return;
+        }
+
+        const x = parseNumberInput(rotateXInput);
+        const y = parseNumberInput(rotateYInput);
+        const z = parseNumberInput(rotateZInput);
+
+        if (rotateModeSelect.value === "relative") {
+          const [currentX, currentY, currentZ] = selectedRotation();
+          rotate_by_degrees(selectedModelId, x, y, z);
+          rotateXInput.value = "0.00";
+          rotateYInput.value = "0.00";
+          rotateZInput.value = "0.00";
+          rotateCurrent.textContent = `当前角度：${formatFixed(normalizeDegrees(currentX + x), 2)}, ${formatFixed(normalizeDegrees(currentY + y), 2)}, ${formatFixed(normalizeDegrees(currentZ + z), 2)}°`;
+        } else {
+          set_rotation(selectedModelId, x, y, z);
+          rotateXInput.value = formatFixed(x, 2);
+          rotateYInput.value = formatFixed(y, 2);
+          rotateZInput.value = formatFixed(z, 2);
+          rotateCurrent.textContent = `当前角度：${formatFixed(normalizeDegrees(x), 2)}, ${formatFixed(normalizeDegrees(y), 2)}, ${formatFixed(normalizeDegrees(z), 2)}°`;
+        }
+      };
+
       const updateModelInfoPanel = () => {
         if (selectedModelId === 0) {
           lastModelInfoJson = "";
@@ -891,6 +1028,7 @@
       const scheduleModelInfoRefresh = () => {
         updateModelInfoPanel();
         syncMovePanelFromSelection();
+        syncRotatePanelFromSelection();
         requestAnimationFrame(scheduleModelInfoRefresh);
       };
 
@@ -900,6 +1038,7 @@
         scaleButton.classList.toggle("is-active", tool === "scale");
         rotateButton.classList.toggle("is-active", tool === "rotate");
         syncMovePanelFromSelection(true);
+        syncRotatePanelFromSelection(true);
       };
       let selectedModelId = 0;
 

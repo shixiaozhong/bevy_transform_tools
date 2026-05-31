@@ -72,6 +72,24 @@ pub fn move_model_by(id: u32, x: f32, y: f32, z: f32) {
     });
 }
 
+pub fn set_model_rotation(id: u32, x_degrees: f32, y_degrees: f32, z_degrees: f32) {
+    push_command(ModelCommand::SetRotation {
+        id,
+        rotation_degrees: [x_degrees, y_degrees, z_degrees].map(sanitize_position_component),
+    });
+}
+
+pub fn rotate_model_by(id: u32, x_degrees: f32, y_degrees: f32, z_degrees: f32) {
+    push_command(ModelCommand::RotateBy {
+        id,
+        delta_degrees: [x_degrees, y_degrees, z_degrees].map(sanitize_position_component),
+    });
+}
+
+pub fn set_rotation_focus_axis(axis: i32) {
+    state::set_rotation_focus_axis(usize::try_from(axis).ok());
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn set_model_transform(
     id: u32,
@@ -195,6 +213,21 @@ mod wasm {
     #[wasm_bindgen]
     pub fn move_by(id: u32, x: f32, y: f32, z: f32) {
         move_model_by(id, x, y, z);
+    }
+
+    #[wasm_bindgen]
+    pub fn set_rotation(id: u32, x_degrees: f32, y_degrees: f32, z_degrees: f32) {
+        set_model_rotation(id, x_degrees, y_degrees, z_degrees);
+    }
+
+    #[wasm_bindgen]
+    pub fn rotate_by_degrees(id: u32, x_degrees: f32, y_degrees: f32, z_degrees: f32) {
+        rotate_model_by(id, x_degrees, y_degrees, z_degrees);
+    }
+
+    #[wasm_bindgen]
+    pub fn set_rotate_focus_axis(axis: i32) {
+        set_rotation_focus_axis(axis);
     }
 
     #[wasm_bindgen]

@@ -820,6 +820,7 @@ fn draw_rotate_gizmo(
                 .map(|(_, angle)| angle)
                 .unwrap_or(0.0);
             draw_rotation_ticks(gizmos, origin, print_axis, radius, angle);
+            draw_rotation_direction_arrows(gizmos, origin, print_axis, radius, color);
         }
     }
 
@@ -904,6 +905,71 @@ fn draw_rotation_ticks(
     let current = u * angle_delta.cos() + v * angle_delta.sin();
     gizmos.line(origin, origin + reference * radius, color);
     gizmos.line(origin, origin + current * radius, color);
+}
+
+fn draw_rotation_direction_arrows(
+    gizmos: &mut Gizmos,
+    origin: Vec3,
+    print_axis: Vec3,
+    radius: f32,
+    color: Color,
+) {
+    let axis = print_axis_to_world(print_axis);
+    let u = print_axis_to_world(rotation_handle_radial(print_axis));
+    let v = axis.cross(u).normalize_or_zero();
+    if v.length_squared() < f32::EPSILON {
+        return;
+    }
+
+    let arc_radius = radius * 0.94;
+    for (start_angle, end_angle) in [(-0.85, 0.42), (2.30, 3.57)] {
+        draw_rotation_direction_arc(
+            gizmos,
+            origin,
+            u,
+            v,
+            arc_radius,
+            start_angle,
+            end_angle,
+            color,
+        );
+    }
+}
+
+fn draw_rotation_direction_arc(
+    gizmos: &mut Gizmos,
+    origin: Vec3,
+    u: Vec3,
+    v: Vec3,
+    radius: f32,
+    start_angle: f32,
+    end_angle: f32,
+    color: Color,
+) {
+    let segments = 20;
+    let mut previous = origin + rotation_arc_direction(u, v, start_angle) * radius;
+    for index in 1..=segments {
+        let t = index as f32 / segments as f32;
+        let angle = start_angle + (end_angle - start_angle) * t;
+        let current = origin + rotation_arc_direction(u, v, angle) * radius;
+        gizmos.line(previous, current, color);
+        previous = current;
+    }
+
+    let tip = origin + rotation_arc_direction(u, v, end_angle) * radius;
+    let tangent = rotation_arc_tangent(u, v, end_angle);
+    let arrow_start = tip - tangent * radius * 0.15;
+    gizmos
+        .arrow(arrow_start, tip, color)
+        .with_tip_length(radius * 0.065);
+}
+
+fn rotation_arc_direction(u: Vec3, v: Vec3, angle: f32) -> Vec3 {
+    u * angle.cos() + v * angle.sin()
+}
+
+fn rotation_arc_tangent(u: Vec3, v: Vec3, angle: f32) -> Vec3 {
+    (-u * angle.sin() + v * angle.cos()).normalize_or_zero()
 }
 
 fn draw_model_aabb(gizmos: &mut Gizmos, bounds: MeshBounds, transform: &Transform) {

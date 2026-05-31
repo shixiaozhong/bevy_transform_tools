@@ -98,6 +98,31 @@ pub(super) fn apply_model_commands(
                     }
                 }
             }
+            ModelCommand::SetRotation {
+                id,
+                rotation_degrees,
+            } => {
+                for (_, model, mut model_transform, _) in &mut models {
+                    if model.id == id {
+                        set_model_rotation(
+                            model,
+                            &mut model_transform,
+                            print_rotation_degrees_to_world(rotation_degrees),
+                        );
+                        break;
+                    }
+                }
+            }
+            ModelCommand::RotateBy { id, delta_degrees } => {
+                for (_, model, mut model_transform, _) in &mut models {
+                    if model.id == id {
+                        let delta = print_rotation_degrees_to_world(delta_degrees);
+                        let rotation = delta * model_transform.rotation;
+                        set_model_rotation(model, &mut model_transform, rotation);
+                        break;
+                    }
+                }
+            }
             ModelCommand::CenterOnOrigin(id) => {
                 for (_, model, mut model_transform, _) in &mut models {
                     if model.id == id {
@@ -186,9 +211,10 @@ pub(super) fn update_api_state_from_scene(
         models.iter().map(|(model, transform)| {
             (
                 model.id,
-                TransformSnapshot::from_transform_with_visual_position(
+                TransformSnapshot::from_transform_with_visual_position_and_rotation(
                     transform,
                     model_visual_center(model, transform),
+                    world_rotation_to_print_degrees(transform.rotation),
                 ),
                 model_info_snapshot(model, transform),
             )
@@ -223,6 +249,20 @@ fn drop_model_to_build_plate(model: &ImportedModel, transform: &mut Transform) {
     transform.translation.y -= min_y;
 }
 
+fn set_model_rotation(model: &ImportedModel, transform: &mut Transform, rotation: Quat) {
+    let center = model_visual_center(model, transform);
+    transform.rotation = rotation.normalize();
+    recenter_model_visual_center(model, transform, center);
+}
+
+fn recenter_model_visual_center(model: &ImportedModel, transform: &mut Transform, center: Vec3) {
+    if let Some(bounds) = model.bounds {
+        transform.translation = center - transform.rotation * (bounds.center * transform.scale);
+    } else {
+        transform.translation = center;
+    }
+}
+
 fn transformed_bounds_min_y(bounds: MeshBounds, transform: &Transform) -> f32 {
     let half = bounds.size * 0.5;
     let local_corners = [
@@ -240,6 +280,34 @@ fn transformed_bounds_min_y(bounds: MeshBounds, transform: &Transform) -> f32 {
         .into_iter()
         .map(|corner| transform.transform_point(corner).y)
         .fold(f32::INFINITY, f32::min)
+}
+
+fn print_rotation_degrees_to_world(rotation_degrees: [f32; 3]) -> Quat {
+    let print_rotation = Quat::from_euler(
+        EulerRot::XYZ,
+        rotation_degrees[0].to_radians(),
+        rotation_degrees[1].to_radians(),
+        rotation_degrees[2].to_radians(),
+    );
+    let world_from_print = print_rotation_basis();
+    let print_from_world = world_from_print.transpose();
+    Quat::from_mat3(&(world_from_print * Mat3::from_quat(print_rotation) * print_from_world))
+        .normalize()
+}
+
+fn world_rotation_to_print_degrees(rotation: Quat) -> [f32; 3] {
+    let world_from_print = print_rotation_basis();
+    let print_from_world = world_from_print.transpose();
+    let print_rotation = Quat::from_mat3(
+        &(print_from_world * Mat3::from_quat(rotation.normalize()) * world_from_print),
+    )
+    .normalize();
+    let (x, y, z) = print_rotation.to_euler(EulerRot::XYZ);
+    [x.to_degrees(), y.to_degrees(), z.to_degrees()]
+}
+
+fn print_rotation_basis() -> Mat3 {
+    Mat3::from_cols(Vec3::X, Vec3::NEG_Z, Vec3::Y)
 }
 
 fn model_info_snapshot(model: &ImportedModel, transform: &Transform) -> ModelInfoSnapshot {

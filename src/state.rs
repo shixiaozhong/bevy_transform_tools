@@ -7,6 +7,7 @@ use crate::mesh::MeshData;
 thread_local! {
     static PENDING_COMMANDS: RefCell<Vec<ModelCommand>> = const { RefCell::new(Vec::new()) };
     static API_STATE: RefCell<ApiState> = RefCell::new(ApiState::default());
+    static ROTATION_FOCUS_AXIS: RefCell<Option<usize>> = const { RefCell::new(None) };
 }
 
 #[derive(Clone, Debug)]
@@ -32,6 +33,14 @@ pub(crate) enum ModelCommand {
     TranslateBy {
         id: u32,
         delta: [f32; 3],
+    },
+    SetRotation {
+        id: u32,
+        rotation_degrees: [f32; 3],
+    },
+    RotateBy {
+        id: u32,
+        delta_degrees: [f32; 3],
     },
     CenterOnOrigin(u32),
     DropToBuildPlate(u32),
@@ -85,6 +94,7 @@ impl TransformSpec {
 pub(crate) struct TransformSnapshot {
     translation: [f32; 3],
     visual_position: [f32; 3],
+    rotation_degrees: [f32; 3],
     rotation_xyzw: [f32; 4],
     scale: [f32; 3],
 }
@@ -98,9 +108,24 @@ impl TransformSnapshot {
         transform: &Transform,
         visual_position: Vec3,
     ) -> Self {
+        let (x, y, z) = transform.rotation.to_euler(EulerRot::XYZ);
+        let rotation_degrees = [x.to_degrees(), y.to_degrees(), z.to_degrees()];
+        Self::from_transform_with_visual_position_and_rotation(
+            transform,
+            visual_position,
+            rotation_degrees,
+        )
+    }
+
+    pub(crate) fn from_transform_with_visual_position_and_rotation(
+        transform: &Transform,
+        visual_position: Vec3,
+        rotation_degrees: [f32; 3],
+    ) -> Self {
         Self {
             translation: transform.translation.to_array(),
             visual_position: visual_position.to_array(),
+            rotation_degrees,
             rotation_xyzw: transform.rotation.to_array(),
             scale: transform.scale.to_array(),
         }
@@ -108,13 +133,16 @@ impl TransformSnapshot {
 
     fn to_json(self) -> String {
         format!(
-            "{{\"translation\":[{},{},{}],\"visual_position\":[{},{},{}],\"rotation_xyzw\":[{},{},{},{}],\"scale\":[{},{},{}]}}",
+            "{{\"translation\":[{},{},{}],\"visual_position\":[{},{},{}],\"rotation_degrees\":[{},{},{}],\"rotation_xyzw\":[{},{},{},{}],\"scale\":[{},{},{}]}}",
             self.translation[0],
             self.translation[1],
             self.translation[2],
             self.visual_position[0],
             self.visual_position[1],
             self.visual_position[2],
+            self.rotation_degrees[0],
+            self.rotation_degrees[1],
+            self.rotation_degrees[2],
             self.rotation_xyzw[0],
             self.rotation_xyzw[1],
             self.rotation_xyzw[2],
@@ -163,6 +191,14 @@ pub(crate) fn push_command(command: ModelCommand) {
 
 pub(crate) fn drain_commands() -> Vec<ModelCommand> {
     PENDING_COMMANDS.with(|queue| queue.borrow_mut().drain(..).collect())
+}
+
+pub(crate) fn set_rotation_focus_axis(axis: Option<usize>) {
+    ROTATION_FOCUS_AXIS.with(|focus| *focus.borrow_mut() = axis.filter(|axis| *axis < 3));
+}
+
+pub(crate) fn rotation_focus_axis() -> Option<usize> {
+    ROTATION_FOCUS_AXIS.with(|focus| *focus.borrow())
 }
 
 pub(crate) fn allocate_model_id() -> u32 {

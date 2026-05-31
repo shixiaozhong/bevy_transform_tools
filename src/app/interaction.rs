@@ -288,6 +288,17 @@ pub(super) fn update_rotate_gizmo_hover(
         return;
     }
 
+    if let Some(axis) = state::rotation_focus_axis() {
+        let print_axis = match axis {
+            0 => Vec3::X,
+            1 => Vec3::Y,
+            2 => Vec3::Z,
+            _ => return,
+        };
+        hover.axis = Some(print_axis_to_world(print_axis));
+        return;
+    }
+
     let Some(selected_id) = selected.0 else {
         return;
     };
