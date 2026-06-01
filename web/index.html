@@ -546,6 +546,23 @@
           <span class="color-swatch" aria-hidden="true"></span>
           <span class="tool-label">颜色</span>
         </button>
+        <button
+          id="delete-model"
+          class="tool-button"
+          type="button"
+          title="删除模型"
+          aria-label="删除模型"
+          data-requires-selection
+          disabled
+        >
+          <svg viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M20 21h24" />
+            <path d="M26 21v-5h12v5" />
+            <path d="M24 26v24h16V26" />
+            <path d="M29 31v14M35 31v14" />
+          </svg>
+          <span class="tool-label">删除</span>
+        </button>
       </div>
     </div>
 
@@ -632,6 +649,7 @@
         activate_scale_tool_mode,
         center_model,
         clear_tool_mode,
+        delete_model,
         drop_model_to_platform,
         get_model_info_json,
         get_model_transform_json,
@@ -673,6 +691,7 @@
       const colorInput = document.querySelector("#model-color");
       const centerButton = document.querySelector("#center-model");
       const dropButton = document.querySelector("#drop-model");
+      const deleteButton = document.querySelector("#delete-model");
       const movePanel = document.querySelector("#move-panel");
       const moveModeSelect = document.querySelector("#move-mode");
       const moveValueLabel = document.querySelector("#move-value-label");
@@ -801,6 +820,19 @@
         if (selectedModelId !== 0) {
           drop_model_to_platform(selectedModelId);
         }
+      });
+
+      deleteButton.addEventListener("click", () => {
+        if (selectedModelId === 0) {
+          return;
+        }
+
+        delete_model(selectedModelId);
+        selectedModelId = 0;
+        lastModelInfoJson = "";
+        setActiveToolButton(null);
+        syncToolAvailability();
+        updateModelInfoPanel();
       });
 
       moveModeSelect.addEventListener("change", () => {

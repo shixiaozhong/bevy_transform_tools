@@ -27,6 +27,11 @@ pub fn clear_models() {
     clear_api_models();
 }
 
+pub fn remove_model(id: u32) {
+    push_command(ModelCommand::Remove(id));
+    state::forget_api_model(id);
+}
+
 pub fn center_model_on_origin(id: u32) {
     push_command(ModelCommand::CenterOnOrigin(id));
 }
@@ -183,6 +188,11 @@ mod wasm {
     #[wasm_bindgen]
     pub fn clear_scene_models() {
         clear_models();
+    }
+
+    #[wasm_bindgen]
+    pub fn delete_model(id: u32) {
+        remove_model(id);
     }
 
     #[wasm_bindgen]

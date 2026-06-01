@@ -148,6 +148,18 @@ pub(super) fn apply_model_commands(
                 }
             }
             ModelCommand::SetActiveTool(mode) => active_tool.set_mode(mode),
+            ModelCommand::Remove(id) => {
+                for (entity, model, _, _) in &mut models {
+                    if model.id == id {
+                        commands.entity(entity).despawn();
+                        if selected.0 == Some(id) {
+                            selected.0 = None;
+                            active_tool.set_mode(state::ToolModeSpec::None);
+                        }
+                        break;
+                    }
+                }
+            }
             ModelCommand::RemoveAll => {
                 for (entity, _, _, _) in &mut models {
                     commands.entity(entity).despawn();

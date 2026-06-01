@@ -49,6 +49,7 @@ pub(crate) enum ModelCommand {
     CenterOnOrigin(u32),
     DropToBuildPlate(u32),
     SetActiveTool(ToolModeSpec),
+    Remove(u32),
     RemoveAll,
     Select(u32),
 }
@@ -241,6 +242,22 @@ pub(crate) fn clear_api_models() {
         state.transforms.clear();
         state.model_infos.clear();
         changed
+    });
+    if changed {
+        notify_selection_changed(None);
+    }
+}
+
+pub(crate) fn forget_api_model(id: u32) {
+    let changed = API_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.transforms.remove(&id);
+        state.model_infos.remove(&id);
+        if state.selected == Some(id) {
+            update_selected(&mut state, None)
+        } else {
+            false
+        }
     });
     if changed {
         notify_selection_changed(None);
