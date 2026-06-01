@@ -124,7 +124,9 @@ pub fn set_model_transform(
     push_command(ModelCommand::SetTransform { id, transform });
 }
 
-pub use state::{last_error, model_info_json, selected_model_id, transform_json};
+pub use state::{
+    last_error, model_info_json, selected_bounds_json, selected_model_id, transform_json,
+};
 
 fn sanitize_color_channel(value: f32) -> f32 {
     if value.is_finite() {
@@ -263,6 +265,11 @@ mod wasm {
     #[wasm_bindgen]
     pub fn get_selected_model_id() -> u32 {
         selected_model_id()
+    }
+
+    #[wasm_bindgen]
+    pub fn get_selected_bounds_json() -> String {
+        selected_bounds_json()
     }
 
     #[wasm_bindgen]

@@ -11,7 +11,7 @@ use super::{
     GRID_HALF_EXTENT,
     camera::{OrbitCamera, set_orbit_view_direction, sync_orbit_transform},
     interaction::{GizmoDrag, RotateGizmoHover},
-    model::{ImportedModel, SelectedModel, model_visual_center},
+    model::{ImportedModel, SelectedModel, model_visual_center, selected_world_bounds},
     tool::ActiveTool,
 };
 
@@ -319,7 +319,7 @@ pub(super) fn draw_grid_and_selection(
 ) {
     draw_ground_grid(&mut gizmos);
     update_scale_handle_visuals(
-        selected.0,
+        &selected,
         &active_tool,
         &models,
         &mut scale_handles,
@@ -327,7 +327,7 @@ pub(super) fn draw_grid_and_selection(
     );
     draw_selected_model_tools(
         &mut gizmos,
-        selected.0,
+        &selected,
         &active_tool,
         &gizmo_drag,
         &rotate_hover,
@@ -367,19 +367,23 @@ pub(super) fn update_rotation_angle_label(
         return;
     }
 
-    let Some(selected_id) = selected.0 else {
+    let Some(selected_id) = selected.primary() else {
         label.display = Display::None;
         return;
     };
 
     let (camera, camera_transform) = *camera;
-    for (model, transform) in &models {
+    for (model, _) in &models {
         if model.id != selected_id {
             continue;
         }
 
-        let origin = model_visual_center(model, transform);
-        let radius = rotate_gizmo_radius(model, transform);
+        let Some((min, max)) = selected_world_bounds(&selected, &models) else {
+            label.display = Display::None;
+            return;
+        };
+        let origin = (min + max) * 0.5;
+        let radius = rotate_gizmo_radius(max - min);
         let Some(print_axis) = world_axis_to_rotation_print_axis(axis) else {
             label.display = Display::None;
             return;
@@ -418,7 +422,7 @@ fn update_scale_label(
         label.display = Display::None;
         return;
     };
-    let Some(selected_id) = selected.0 else {
+    let Some(selected_id) = selected.primary() else {
         label.display = Display::None;
         return;
     };
@@ -427,7 +431,9 @@ fn update_scale_label(
         if model.id != selected_id {
             continue;
         }
-        let position = model_visual_center(model, transform);
+        let position = selected_world_bounds(&selected, models)
+            .map(|(min, max)| (min + max) * 0.5)
+            .unwrap_or_else(|| model_visual_center(model, transform));
         let Ok(screen_position) = camera.world_to_viewport(camera_transform, position) else {
             label.display = Display::None;
             return;
@@ -633,52 +639,60 @@ fn ray_orientation_block_distance(ray: &Ray3d, direction: Vec3) -> Option<f32> {
 
 fn draw_selected_model_tools(
     gizmos: &mut Gizmos,
-    selected_id: Option<u32>,
+    selected: &SelectedModel,
     active_tool: &ActiveTool,
     gizmo_drag: &GizmoDrag,
     rotate_hover: &RotateGizmoHover,
     models: &Query<(&ImportedModel, &Transform)>,
 ) {
-    let Some(selected_id) = selected_id else {
+    let Some(primary_id) = selected.primary() else {
         return;
     };
+    let Some((selection_min, selection_max)) = selected_world_bounds(selected, models) else {
+        return;
+    };
+    let selection_center = (selection_min + selection_max) * 0.5;
+    let selection_size = selection_max - selection_min;
+    let show_selection_bounds =
+        !active_tool.is_move() && !active_tool.is_rotate() && !active_tool.is_scale();
+
+    if show_selection_bounds && selected.len() > 1 {
+        draw_world_aabb(gizmos, selection_min, selection_max);
+    }
 
     for (model, transform) in models {
-        if model.id != selected_id {
-            continue;
-        }
-
-        if !active_tool.is_move()
-            && !active_tool.is_rotate()
-            && !active_tool.is_scale()
+        if show_selection_bounds
+            && selected.len() == 1
+            && selected.contains(model.id)
             && let Some(bounds) = model.bounds
         {
             draw_model_aabb(gizmos, bounds, transform);
         }
+
+        if model.id != primary_id {
+            continue;
+        }
+
         if active_tool.is_move() {
-            draw_move_gizmo(gizmos, model, transform);
+            draw_move_gizmo(gizmos, selection_center, selection_size);
         }
         if active_tool.is_rotate() {
             draw_rotate_gizmo(
                 gizmos,
-                model,
-                transform,
+                selection_center,
+                selection_size,
                 gizmo_drag.active_rotation(),
                 rotate_hover.axis,
             );
         }
         if active_tool.is_scale() {
-            draw_scale_gizmo(gizmos, model, transform);
+            draw_scale_gizmo(gizmos, (selection_min, selection_max));
         }
-
-        break;
     }
 }
 
-fn draw_move_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Transform) {
-    let origin = model_visual_center(model, transform);
-    let length = move_gizmo_length(model, transform);
-
+fn draw_move_gizmo(gizmos: &mut Gizmos, origin: Vec3, size: Vec3) {
+    let length = move_gizmo_length(size);
     for (print_axis, color) in print_axis_colors() {
         let world_axis = print_axis_to_world(print_axis);
         gizmos.arrow(origin, origin + world_axis * length, color);
@@ -686,8 +700,8 @@ fn draw_move_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Trans
     gizmos.sphere(origin, 0.07 * length, Color::srgb(0.08, 0.52, 0.48));
 }
 
-fn draw_scale_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Transform) {
-    let (min, max) = scale_gizmo_bounds(model, transform);
+fn draw_scale_gizmo(gizmos: &mut Gizmos, bounds: (Vec3, Vec3)) {
+    let (min, max) = bounds;
     let bottom_y = min.y;
     let red = axis_x_color();
 
@@ -703,7 +717,7 @@ fn draw_scale_gizmo(gizmos: &mut Gizmos, model: &ImportedModel, transform: &Tran
 }
 
 fn update_scale_handle_visuals(
-    selected_id: Option<u32>,
+    selected: &SelectedModel,
     active_tool: &ActiveTool,
     models: &Query<(&ImportedModel, &Transform)>,
     scale_handles: &mut Query<
@@ -717,22 +731,22 @@ fn update_scale_handle_visuals(
     >,
     materials: &mut Assets<StandardMaterial>,
 ) {
-    let Some(selected_id) = selected_id.filter(|_| active_tool.is_scale()) else {
+    if !active_tool.is_scale() || selected.primary().is_none() {
+        for (_, _, mut visibility, _) in scale_handles {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
+
+    let Some(bounds) = selected_world_bounds(selected, models) else {
         for (_, _, mut visibility, _) in scale_handles {
             *visibility = Visibility::Hidden;
         }
         return;
     };
 
-    let Some((model, transform)) = models.iter().find(|(model, _)| model.id == selected_id) else {
-        for (_, _, mut visibility, _) in scale_handles {
-            *visibility = Visibility::Hidden;
-        }
-        return;
-    };
-
-    let handle_size = move_gizmo_length(model, transform) * 0.055;
-    let handles = scale_handle_visual_layout(model, transform);
+    let handle_size = move_gizmo_length(bounds.1 - bounds.0) * 0.055;
+    let handles = scale_handle_visual_layout(bounds);
 
     for (handle, mut handle_transform, mut visibility, mut material) in scale_handles {
         let Some((position, color)) = handles.get(handle.index).copied() else {
@@ -758,8 +772,8 @@ fn update_scale_handle_visuals(
     }
 }
 
-fn scale_handle_visual_layout(model: &ImportedModel, transform: &Transform) -> [(Vec3, Color); 9] {
-    let (min, max) = scale_gizmo_bounds(model, transform);
+fn scale_handle_visual_layout(bounds: (Vec3, Vec3)) -> [(Vec3, Color); 9] {
+    let (min, max) = bounds;
     let center = (min + max) * 0.5;
     let bottom_y = min.y;
     let top_y = max.y;
@@ -783,13 +797,12 @@ fn scale_handle_visual_layout(model: &ImportedModel, transform: &Transform) -> [
 
 fn draw_rotate_gizmo(
     gizmos: &mut Gizmos,
-    model: &ImportedModel,
-    transform: &Transform,
+    origin: Vec3,
+    size: Vec3,
     active_rotation: Option<(Vec3, f32)>,
     hovered_axis: Option<Vec3>,
 ) {
-    let origin = model_visual_center(model, transform);
-    let radius = rotate_gizmo_radius(model, transform);
+    let radius = rotate_gizmo_radius(size);
     let focused_axis = active_rotation.map(|(axis, _)| axis).or(hovered_axis);
 
     for (print_axis, color) in print_axis_colors() {
@@ -974,6 +987,26 @@ fn rotation_arc_tangent(u: Vec3, v: Vec3, angle: f32) -> Vec3 {
 
 fn draw_model_aabb(gizmos: &mut Gizmos, bounds: MeshBounds, transform: &Transform) {
     let corners = world_aabb_corners(bounds, transform);
+    draw_aabb_corners(gizmos, corners);
+}
+
+fn draw_world_aabb(gizmos: &mut Gizmos, min: Vec3, max: Vec3) {
+    draw_aabb_corners(
+        gizmos,
+        [
+            Vec3::new(min.x, min.y, min.z),
+            Vec3::new(max.x, min.y, min.z),
+            Vec3::new(max.x, max.y, min.z),
+            Vec3::new(min.x, max.y, min.z),
+            Vec3::new(min.x, min.y, max.z),
+            Vec3::new(max.x, min.y, max.z),
+            Vec3::new(max.x, max.y, max.z),
+            Vec3::new(min.x, max.y, max.z),
+        ],
+    );
+}
+
+fn draw_aabb_corners(gizmos: &mut Gizmos, corners: [Vec3; 8]) {
     let color = Color::srgb(1.0, 0.86, 0.18);
 
     for (start, end) in AABB_EDGES {
@@ -1431,39 +1464,12 @@ const AABB_EDGES: [(usize, usize); 12] = [
 
 const ORIENTATION_AXIS_CORNER: Vec3 = Vec3::new(-0.5, -0.5, -0.5);
 
-fn move_gizmo_length(model: &ImportedModel, transform: &Transform) -> f32 {
-    let scale = transform.scale.abs().max_element().max(1.0);
-    let model_size = model
-        .bounds
-        .map(|bounds| bounds.size.max_element().abs() * scale * 0.7)
-        .unwrap_or(0.0);
-    model_size.max(2.2 * scale)
+fn move_gizmo_length(size: Vec3) -> f32 {
+    size.max_element().abs().max(2.2) * 0.7
 }
 
-fn rotate_gizmo_radius(model: &ImportedModel, transform: &Transform) -> f32 {
-    move_gizmo_length(model, transform) * 0.86
-}
-
-fn scale_gizmo_bounds(model: &ImportedModel, transform: &Transform) -> (Vec3, Vec3) {
-    let Some(bounds) = model.bounds else {
-        let half = Vec3::splat(0.5);
-        return (transform.translation - half, transform.translation + half);
-    };
-
-    let half = bounds.size * 0.5;
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for x in [-half.x, half.x] {
-        for y in [-half.y, half.y] {
-            for z in [-half.z, half.z] {
-                let point = transform.transform_point(bounds.center + Vec3::new(x, y, z));
-                min = min.min(point);
-                max = max.max(point);
-            }
-        }
-    }
-
-    (min, max)
+fn rotate_gizmo_radius(size: Vec3) -> f32 {
+    move_gizmo_length(size) * 0.86
 }
 
 fn world_axis_to_rotation_print_axis(axis: Vec3) -> Option<Vec3> {

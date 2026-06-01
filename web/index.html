@@ -652,6 +652,7 @@
         delete_model,
         drop_model_to_platform,
         get_model_info_json,
+        get_selected_bounds_json,
         get_model_transform_json,
         load_obj_model,
         load_stl_model,
@@ -823,12 +824,16 @@
       });
 
       deleteButton.addEventListener("click", () => {
-        if (selectedModelId === 0) {
+        if (selectedModelIds.length === 0) {
           return;
         }
 
-        delete_model(selectedModelId);
+        const ids = [...selectedModelIds];
+        for (const id of ids) {
+          delete_model(id);
+        }
         selectedModelId = 0;
+        selectedModelIds = [];
         lastModelInfoJson = "";
         setActiveToolButton(null);
         syncToolAvailability();
@@ -925,7 +930,7 @@
       });
 
       const syncToolAvailability = () => {
-        const hasSelection = selectedModelId !== 0;
+        const hasSelection = selectedModelIds.length > 0;
         for (const button of selectionTools) {
           button.disabled = !hasSelection;
         }
@@ -966,6 +971,11 @@
       };
 
       const selectedTranslation = () => {
+        const bounds = selectedBounds();
+        if (bounds) {
+          return worldToPlatformPosition(groupBoundsCenter(bounds));
+        }
+
         const transform = getSelectedTransform();
         return worldToPlatformPosition(
           transform?.visual_position ?? transform?.translation ?? [0, 0, 0],
@@ -984,6 +994,12 @@
       };
 
       const selectedModelSize = () => {
+        const bounds = selectedBounds();
+        if (bounds) {
+          const size = groupBoundsSize(bounds);
+          return [size[0], size[2], size[1]];
+        }
+
         if (selectedModelId === 0) {
           return [0, 0, 0];
         }
@@ -996,6 +1012,31 @@
         const info = JSON.parse(infoJson);
         const [x = 0, y = 0, z = 0] = info.size ?? [0, 0, 0];
         return [x, z, y];
+      };
+
+      const selectedBounds = () => {
+        if (selectedModelIds.length === 0) {
+          return null;
+        }
+
+        const boundsJson = get_selected_bounds_json();
+        if (!boundsJson || boundsJson === "null") {
+          return null;
+        }
+
+        return JSON.parse(boundsJson);
+      };
+
+      const groupBoundsCenter = (bounds) => {
+        const [minX = 0, minY = 0, minZ = 0] = bounds.min ?? [];
+        const [maxX = 0, maxY = 0, maxZ = 0] = bounds.max ?? [];
+        return [(minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5];
+      };
+
+      const groupBoundsSize = (bounds) => {
+        const [minX = 0, minY = 0, minZ = 0] = bounds.min ?? [];
+        const [maxX = 0, maxY = 0, maxZ = 0] = bounds.max ?? [];
+        return [maxX - minX, maxY - minY, maxZ - minZ];
       };
 
       const normalizeDegrees = (value) => {
@@ -1294,11 +1335,15 @@
         syncScalePanelFromSelection(true);
       };
       let selectedModelId = 0;
+      let selectedModelIds = [];
 
       window.addEventListener(
         "bevy-transform-tools:selection-change",
         (event) => {
           selectedModelId = event.detail?.selectedModelId ?? 0;
+          selectedModelIds =
+            event.detail?.selectedModelIds ??
+            (selectedModelId === 0 ? [] : [selectedModelId]);
           syncToolAvailability();
           updateModelInfoPanel();
         },

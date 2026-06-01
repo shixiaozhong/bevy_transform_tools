@@ -8,7 +8,10 @@ use crate::state::{self, ToolModeSpec};
 use super::{
     camera::{OrbitCamera, OrbitDrag},
     drawing::{OrientationInteraction, OrientationViewTarget},
-    model::{ImportedModel, ModelDrag, ModelDragState, SelectedModel, model_visual_center},
+    model::{
+        ImportedModel, ModelDrag, ModelDragState, SelectedModel, model_visual_center,
+        selected_world_bounds,
+    },
     tool::ActiveTool,
 };
 
@@ -30,24 +33,24 @@ impl GizmoDrag {
     }
 
     pub(super) fn active_rotation(&self) -> Option<(Vec3, f32)> {
-        match self.active {
+        match &self.active {
             Some(GizmoDragState {
                 mode:
                     GizmoDragMode::Rotate {
                         axis, angle_delta, ..
                     },
                 ..
-            }) => Some((axis, angle_delta)),
+            }) => Some((*axis, *angle_delta)),
             _ => None,
         }
     }
 
     pub(super) fn active_scale(&self) -> Option<Option<usize>> {
-        match self.active {
+        match &self.active {
             Some(GizmoDragState {
                 mode: GizmoDragMode::Scale { mode, .. },
                 ..
-            }) => Some(match mode {
+            }) => Some(match *mode {
                 ScaleDragMode::Uniform => None,
                 ScaleDragMode::Axis { component } => Some(component),
             }),
@@ -70,33 +73,32 @@ impl GizmoDrag {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct GizmoDragState {
-    id: u32,
     mode: GizmoDragMode,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum GizmoDragMode {
     Move {
         axis: Vec3,
         screen_axis: Vec2,
         start_cursor: Vec2,
-        start_translation: Vec3,
+        start_translations: Vec<(u32, Vec3)>,
         units_per_pixel: f32,
     },
     Rotate {
         axis: Vec3,
         origin: Vec3,
         start_vector: Vec3,
-        start_rotation: Quat,
+        start_transforms: Vec<(u32, Transform)>,
         angle_delta: f32,
     },
     Scale {
         mode: ScaleDragMode,
         screen_axis: Vec2,
         start_cursor: Vec2,
-        start_scale: Vec3,
+        start_transforms: Vec<(u32, Transform)>,
         origin: Vec3,
     },
 }
@@ -109,6 +111,7 @@ pub(super) enum ScaleDragMode {
 
 pub(super) fn select_model_on_click(
     click: On<Pointer<Click>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     models: Query<&ImportedModel>,
     mut selected: ResMut<SelectedModel>,
 ) {
@@ -116,8 +119,12 @@ pub(super) fn select_model_on_click(
         return;
     };
 
-    selected.0 = Some(model.id);
-    state::remember_selection(Some(model.id));
+    if keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]) {
+        selected.toggle(model.id);
+    } else {
+        selected.set_single(model.id);
+    }
+    state::remember_selected_models(selected.ids().iter().copied());
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -149,7 +156,7 @@ pub(super) fn clear_selection_on_non_model_click(
         return;
     }
 
-    selected.0 = None;
+    selected.clear();
     model_drag.active = None;
     active_tool.set_mode(ToolModeSpec::None);
     state::remember_selection(None);
@@ -186,7 +193,7 @@ pub(super) fn start_model_drag(
         return;
     };
 
-    selected.0 = Some(model.id);
+    selected.set_single(model.id);
     state::remember_selection(Some(model.id));
     model_drag.active = Some(ModelDragState {
         id: model.id,
@@ -211,59 +218,58 @@ pub(super) fn begin_move_gizmo_drag(
         return;
     }
 
-    let Some(selected_id) = selected.0 else {
+    if selected.primary().is_none() {
         return;
     };
     let Some(cursor) = window.cursor_position() else {
         return;
     };
 
+    let Some((min, max)) = selected_world_bounds(&selected, &models) else {
+        return;
+    };
+    let origin = (min + max) * 0.5;
+    let size = max - min;
+    let start_transforms = selected_start_transforms(&selected, &models);
     let (camera, camera_transform) = *camera;
-    for (model, transform) in &models {
-        if model.id != selected_id {
-            continue;
-        }
 
-        let origin = model_visual_center(model, transform);
-        if active_tool.is_move() {
-            let length = move_gizmo_length(model, transform);
-            if let Some(active) = pick_move_gizmo_axis(
-                selected_id,
-                cursor,
-                camera,
-                camera_transform,
-                origin,
-                length,
-                transform.translation,
-            ) {
-                drag.active = Some(active);
-            }
-        } else if active_tool.is_rotate() {
-            let radius = rotate_gizmo_radius(model, transform);
-            if let Some(active) = pick_rotate_gizmo_axis(
-                selected_id,
-                cursor,
-                camera,
-                camera_transform,
-                origin,
-                radius,
-                transform.rotation,
-            ) {
-                drag.active = Some(active);
-            }
-        } else if active_tool.is_scale() {
-            if let Some(active) = pick_scale_gizmo_handle(
-                selected_id,
-                cursor,
-                camera,
-                camera_transform,
-                model,
-                transform,
-            ) {
-                drag.active = Some(active);
-            }
+    if active_tool.is_move() {
+        let length = selection_gizmo_length(size);
+        if let Some(active) = pick_move_gizmo_axis(
+            cursor,
+            camera,
+            camera_transform,
+            origin,
+            length,
+            start_transforms
+                .iter()
+                .map(|(id, transform)| (*id, transform.translation))
+                .collect(),
+        ) {
+            drag.active = Some(active);
         }
-        break;
+    } else if active_tool.is_rotate() {
+        let radius = selection_rotate_gizmo_radius(size);
+        if let Some(active) = pick_rotate_gizmo_axis(
+            cursor,
+            camera,
+            camera_transform,
+            origin,
+            radius,
+            start_transforms,
+        ) {
+            drag.active = Some(active);
+        }
+    } else if active_tool.is_scale()
+        && let Some(active) = pick_scale_gizmo_handle(
+            cursor,
+            camera,
+            camera_transform,
+            (min, max),
+            start_transforms,
+        )
+    {
+        drag.active = Some(active);
     }
 }
 
@@ -299,28 +305,24 @@ pub(super) fn update_rotate_gizmo_hover(
         return;
     }
 
-    let Some(selected_id) = selected.0 else {
+    if selected.primary().is_none() {
         return;
     };
     let Some(cursor) = window.cursor_position() else {
         return;
     };
 
+    let Some((min, max)) = selected_world_bounds(&selected, &models) else {
+        return;
+    };
+    let origin = (min + max) * 0.5;
+    let radius = selection_rotate_gizmo_radius(max - min);
     let (camera, camera_transform) = *camera;
-    for (model, transform) in &models {
-        if model.id != selected_id {
-            continue;
-        }
-
-        let origin = model_visual_center(model, transform);
-        let radius = rotate_gizmo_radius(model, transform);
-        if let Some((axis, angle)) =
-            hovered_rotate_gizmo_handle_axis(cursor, camera, camera_transform, origin, radius)
-        {
-            hover.axis = Some(axis);
-            hover.angle = angle;
-        }
-        break;
+    if let Some((axis, angle)) =
+        hovered_rotate_gizmo_handle_axis(cursor, camera, camera_transform, origin, radius)
+    {
+        hover.axis = Some(axis);
+        hover.angle = angle;
     }
 }
 
@@ -356,14 +358,15 @@ pub(super) fn update_move_gizmo_drag(
             axis,
             screen_axis,
             start_cursor,
-            start_translation,
+            start_translations,
             units_per_pixel,
         } => {
             let offset = (cursor - *start_cursor).dot(*screen_axis) * *units_per_pixel;
             for (model, mut transform) in &mut models {
-                if model.id == active.id {
+                if let Some((_, start_translation)) =
+                    start_translations.iter().find(|(id, _)| *id == model.id)
+                {
                     transform.translation = *start_translation + *axis * offset;
-                    break;
                 }
             }
         }
@@ -371,7 +374,7 @@ pub(super) fn update_move_gizmo_drag(
             axis,
             origin,
             start_vector,
-            start_rotation,
+            start_transforms,
             angle_delta,
         } => {
             let (camera, camera_transform) = *camera;
@@ -382,17 +385,15 @@ pub(super) fn update_move_gizmo_drag(
             };
             let angle = signed_rotation_angle(*start_vector, current_vector, *axis);
             *angle_delta = angle;
+            let delta = Quat::from_axis_angle(*axis, angle);
 
             for (model, mut transform) in &mut models {
-                if model.id == active.id {
-                    transform.rotation = Quat::from_axis_angle(*axis, angle) * *start_rotation;
-                    if let Some(bounds) = model.bounds {
-                        transform.translation =
-                            *origin - transform.rotation * (bounds.center * transform.scale);
-                    } else {
-                        transform.translation = *origin;
-                    }
-                    break;
+                if let Some((_, start_transform)) =
+                    start_transforms.iter().find(|(id, _)| *id == model.id)
+                {
+                    transform.translation =
+                        *origin + delta * (start_transform.translation - *origin);
+                    transform.rotation = delta * start_transform.rotation;
                 }
             }
         }
@@ -400,29 +401,26 @@ pub(super) fn update_move_gizmo_drag(
             mode,
             screen_axis,
             start_cursor,
-            start_scale,
+            start_transforms,
             origin,
         } => {
             let delta = (cursor - *start_cursor).dot(*screen_axis);
             let factor = (1.0 + delta * 0.01).clamp(0.05, 20.0);
+            let scale_factor = match *mode {
+                ScaleDragMode::Uniform => Vec3::splat(factor),
+                ScaleDragMode::Axis { component } => {
+                    let mut scale_factor = Vec3::ONE;
+                    scale_factor[component] = factor;
+                    scale_factor
+                }
+            };
             for (model, mut transform) in &mut models {
-                if model.id == active.id {
-                    match *mode {
-                        ScaleDragMode::Uniform => {
-                            transform.scale = *start_scale * factor;
-                        }
-                        ScaleDragMode::Axis { component } => {
-                            transform.scale = *start_scale;
-                            transform.scale[component] = start_scale[component] * factor;
-                        }
-                    }
-                    if let Some(bounds) = model.bounds {
-                        transform.translation =
-                            *origin - transform.rotation * (bounds.center * transform.scale);
-                    } else {
-                        transform.translation = *origin;
-                    }
-                    break;
+                if let Some((_, start_transform)) =
+                    start_transforms.iter().find(|(id, _)| *id == model.id)
+                {
+                    transform.translation =
+                        *origin + scale_factor * (start_transform.translation - *origin);
+                    transform.scale = start_transform.scale * scale_factor;
                 }
             }
         }
@@ -496,13 +494,12 @@ fn cursor_on_horizontal_plane(
 }
 
 fn pick_move_gizmo_axis(
-    id: u32,
     cursor: Vec2,
     camera: &Camera,
     camera_transform: &GlobalTransform,
     origin: Vec3,
     length: f32,
-    start_translation: Vec3,
+    start_translations: Vec<(u32, Vec3)>,
 ) -> Option<GizmoDragState> {
     let axes = [
         print_axis_to_world(Vec3::X),
@@ -528,18 +525,18 @@ fn pick_move_gizmo_axis(
         }
 
         let drag = GizmoDragState {
-            id,
             mode: GizmoDragMode::Move {
                 axis,
                 screen_axis: screen_vector / screen_length,
                 start_cursor: cursor,
-                start_translation,
+                start_translations: start_translations.clone(),
                 units_per_pixel: length / screen_length,
             },
         };
 
         if best
-            .map(|(best_distance, _)| distance < best_distance)
+            .as_ref()
+            .map(|(best_distance, _)| distance < *best_distance)
             .unwrap_or(true)
         {
             best = Some((distance, drag));
@@ -550,13 +547,12 @@ fn pick_move_gizmo_axis(
 }
 
 fn pick_rotate_gizmo_axis(
-    id: u32,
     cursor: Vec2,
     camera: &Camera,
     camera_transform: &GlobalTransform,
     origin: Vec3,
     radius: f32,
-    start_rotation: Quat,
+    start_transforms: Vec<(u32, Transform)>,
 ) -> Option<GizmoDragState> {
     let mut best = None::<(f32, GizmoDragState)>;
 
@@ -575,18 +571,18 @@ fn pick_rotate_gizmo_axis(
         let start_vector = print_axis_to_world(rotation_handle_radial(print_axis));
 
         let drag = GizmoDragState {
-            id,
             mode: GizmoDragMode::Rotate {
                 axis,
                 origin,
                 start_vector,
-                start_rotation,
+                start_transforms: start_transforms.clone(),
                 angle_delta: 0.0,
             },
         };
 
         if best
-            .map(|(best_distance, _)| distance < best_distance)
+            .as_ref()
+            .map(|(best_distance, _)| distance < *best_distance)
             .unwrap_or(true)
         {
             best = Some((distance, drag));
@@ -661,14 +657,13 @@ fn distance_to_projected_rotation_handle(
 }
 
 fn pick_scale_gizmo_handle(
-    id: u32,
     cursor: Vec2,
     camera: &Camera,
     camera_transform: &GlobalTransform,
-    model: &ImportedModel,
-    transform: &Transform,
+    bounds: (Vec3, Vec3),
+    start_transforms: Vec<(u32, Transform)>,
 ) -> Option<GizmoDragState> {
-    let handles = scale_gizmo_handles(model, transform);
+    let handles = scale_gizmo_handles(bounds);
     let mut best = None::<(f32, GizmoDragState)>;
 
     for (position, mode, drag_axis) in handles {
@@ -689,18 +684,18 @@ fn pick_scale_gizmo_handle(
         }
 
         let drag = GizmoDragState {
-            id,
             mode: GizmoDragMode::Scale {
                 mode,
                 screen_axis,
                 start_cursor: cursor,
-                start_scale: transform.scale,
-                origin: model_visual_center(model, transform),
+                start_transforms: start_transforms.clone(),
+                origin: (bounds.0 + bounds.1) * 0.5,
             },
         };
 
         if best
-            .map(|(best_distance, _)| distance < best_distance)
+            .as_ref()
+            .map(|(best_distance, _)| distance < *best_distance)
             .unwrap_or(true)
         {
             best = Some((distance, drag));
@@ -710,11 +705,8 @@ fn pick_scale_gizmo_handle(
     best.map(|(_, drag)| drag)
 }
 
-fn scale_gizmo_handles(
-    model: &ImportedModel,
-    transform: &Transform,
-) -> Vec<(Vec3, ScaleDragMode, Vec3)> {
-    let (min, max) = scale_gizmo_bounds(model, transform);
+fn scale_gizmo_handles(bounds: (Vec3, Vec3)) -> Vec<(Vec3, ScaleDragMode, Vec3)> {
+    let (min, max) = bounds;
     let center = (min + max) * 0.5;
     let bottom_y = min.y;
     let top_y = max.y;
@@ -759,26 +751,15 @@ fn scale_gizmo_handles(
     handles
 }
 
-fn scale_gizmo_bounds(model: &ImportedModel, transform: &Transform) -> (Vec3, Vec3) {
-    let Some(bounds) = model.bounds else {
-        let half = Vec3::splat(0.5);
-        return (transform.translation - half, transform.translation + half);
-    };
-
-    let half = bounds.size * 0.5;
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for x in [-half.x, half.x] {
-        for y in [-half.y, half.y] {
-            for z in [-half.z, half.z] {
-                let point = transform.transform_point(bounds.center + Vec3::new(x, y, z));
-                min = min.min(point);
-                max = max.max(point);
-            }
-        }
-    }
-
-    (min, max)
+fn selected_start_transforms(
+    selected: &SelectedModel,
+    models: &Query<(&ImportedModel, &Transform)>,
+) -> Vec<(u32, Transform)> {
+    models
+        .iter()
+        .filter(|(model, _)| selected.contains(model.id))
+        .map(|(model, transform)| (model.id, *transform))
+        .collect()
 }
 
 fn cursor_rotation_vector(
@@ -838,15 +819,10 @@ fn distance_to_segment(point: Vec2, start: Vec2, end: Vec2) -> f32 {
     point.distance(start + segment * t)
 }
 
-fn move_gizmo_length(model: &ImportedModel, transform: &Transform) -> f32 {
-    let scale = transform.scale.abs().max_element().max(1.0);
-    let model_size = model
-        .bounds
-        .map(|bounds| bounds.size.max_element().abs() * scale * 0.7)
-        .unwrap_or(0.0);
-    model_size.max(2.2 * scale)
+fn selection_gizmo_length(size: Vec3) -> f32 {
+    size.max_element().abs().max(2.2) * 0.7
 }
 
-fn rotate_gizmo_radius(model: &ImportedModel, transform: &Transform) -> f32 {
-    move_gizmo_length(model, transform) * 0.86
+fn selection_rotate_gizmo_radius(size: Vec3) -> f32 {
+    selection_gizmo_length(size) * 0.86
 }

@@ -20,7 +20,48 @@ pub(super) struct ImportedModel {
 }
 
 #[derive(Resource, Default)]
-pub(super) struct SelectedModel(pub(super) Option<u32>);
+pub(super) struct SelectedModel {
+    ids: Vec<u32>,
+}
+
+impl SelectedModel {
+    pub(super) fn ids(&self) -> &[u32] {
+        &self.ids
+    }
+
+    pub(super) fn primary(&self) -> Option<u32> {
+        self.ids.last().copied()
+    }
+
+    pub(super) fn contains(&self, id: u32) -> bool {
+        self.ids.contains(&id)
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    pub(super) fn set_single(&mut self, id: u32) {
+        self.ids.clear();
+        self.ids.push(id);
+    }
+
+    pub(super) fn toggle(&mut self, id: u32) {
+        if let Some(index) = self.ids.iter().position(|selected| *selected == id) {
+            self.ids.remove(index);
+        } else {
+            self.ids.push(id);
+        }
+    }
+
+    pub(super) fn remove(&mut self, id: u32) {
+        self.ids.retain(|selected| *selected != id);
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.ids.clear();
+    }
+}
 
 #[derive(Resource, Default)]
 pub(super) struct ModelDrag {
@@ -81,20 +122,32 @@ pub(super) fn apply_model_commands(
                 }
             }
             ModelCommand::SetTranslation { id, translation } => {
-                for (_, model, mut model_transform, _) in &mut models {
-                    if model.id == id {
-                        let desired_center = Vec3::from_array(translation);
-                        let current_center = model_visual_center(model, &model_transform);
-                        model_transform.translation += desired_center - current_center;
-                        break;
+                if selected.primary() == Some(id)
+                    && selected.len() > 1
+                    && let Some((min, max)) = selected_bounds_in_scene(&selected, &mut models)
+                {
+                    let delta = Vec3::from_array(translation) - (min + max) * 0.5;
+                    translate_selected_models(&selected, &mut models, delta);
+                } else {
+                    for (_, model, mut model_transform, _) in &mut models {
+                        if model.id == id {
+                            let desired_center = Vec3::from_array(translation);
+                            let current_center = model_visual_center(model, &model_transform);
+                            model_transform.translation += desired_center - current_center;
+                            break;
+                        }
                     }
                 }
             }
             ModelCommand::TranslateBy { id, delta } => {
-                for (_, model, mut model_transform, _) in &mut models {
-                    if model.id == id {
-                        model_transform.translation += Vec3::from_array(delta);
-                        break;
+                if selected.primary() == Some(id) && selected.len() > 1 {
+                    translate_selected_models(&selected, &mut models, Vec3::from_array(delta));
+                } else {
+                    for (_, model, mut model_transform, _) in &mut models {
+                        if model.id == id {
+                            model_transform.translation += Vec3::from_array(delta);
+                            break;
+                        }
                     }
                 }
             }
@@ -102,48 +155,95 @@ pub(super) fn apply_model_commands(
                 id,
                 rotation_degrees,
             } => {
-                for (_, model, mut model_transform, _) in &mut models {
-                    if model.id == id {
-                        set_model_rotation(
-                            model,
-                            &mut model_transform,
-                            print_rotation_degrees_to_world(rotation_degrees),
-                        );
-                        break;
+                if selected.primary() == Some(id)
+                    && selected.len() > 1
+                    && let Some((center, primary_rotation)) =
+                        selected_center_and_primary_rotation(id, &selected, &mut models)
+                {
+                    let delta = print_rotation_degrees_to_world(rotation_degrees)
+                        * primary_rotation.inverse();
+                    rotate_selected_models(&selected, &mut models, center, delta);
+                } else {
+                    for (_, model, mut model_transform, _) in &mut models {
+                        if model.id == id {
+                            set_model_rotation(
+                                model,
+                                &mut model_transform,
+                                print_rotation_degrees_to_world(rotation_degrees),
+                            );
+                            break;
+                        }
                     }
                 }
             }
             ModelCommand::RotateBy { id, delta_degrees } => {
-                for (_, model, mut model_transform, _) in &mut models {
-                    if model.id == id {
-                        let delta = print_rotation_degrees_to_world(delta_degrees);
-                        let rotation = delta * model_transform.rotation;
-                        set_model_rotation(model, &mut model_transform, rotation);
-                        break;
+                let delta = print_rotation_degrees_to_world(delta_degrees);
+                if selected.primary() == Some(id)
+                    && selected.len() > 1
+                    && let Some((center, _)) =
+                        selected_center_and_primary_rotation(id, &selected, &mut models)
+                {
+                    rotate_selected_models(&selected, &mut models, center, delta);
+                } else {
+                    for (_, model, mut model_transform, _) in &mut models {
+                        if model.id == id {
+                            let rotation = delta * model_transform.rotation;
+                            set_model_rotation(model, &mut model_transform, rotation);
+                            break;
+                        }
                     }
                 }
             }
             ModelCommand::SetScale { id, scale } => {
-                for (_, model, mut model_transform, _) in &mut models {
-                    if model.id == id {
-                        set_model_scale(model, &mut model_transform, Vec3::from_array(scale));
-                        break;
+                if selected.primary() == Some(id)
+                    && selected.len() > 1
+                    && let Some((center, primary_scale)) =
+                        selected_center_and_primary_scale(id, &selected, &mut models)
+                {
+                    let desired_scale = Vec3::from_array(scale);
+                    let factor = Vec3::new(
+                        scale_factor_component(desired_scale.x, primary_scale.x),
+                        scale_factor_component(desired_scale.y, primary_scale.y),
+                        scale_factor_component(desired_scale.z, primary_scale.z),
+                    );
+                    scale_selected_models(&selected, &mut models, center, factor);
+                } else {
+                    for (_, model, mut model_transform, _) in &mut models {
+                        if model.id == id {
+                            set_model_scale(model, &mut model_transform, Vec3::from_array(scale));
+                            break;
+                        }
                     }
                 }
             }
             ModelCommand::CenterOnOrigin(id) => {
-                for (_, model, mut model_transform, _) in &mut models {
-                    if model.id == id {
-                        center_model_on_origin(model, &mut model_transform);
-                        break;
+                if selected.primary() == Some(id)
+                    && selected.len() > 1
+                    && let Some((min, max)) = selected_bounds_in_scene(&selected, &mut models)
+                {
+                    translate_selected_models(&selected, &mut models, -((min + max) * 0.5));
+                } else {
+                    for (_, model, mut model_transform, _) in &mut models {
+                        if model.id == id {
+                            center_model_on_origin(model, &mut model_transform);
+                            break;
+                        }
                     }
                 }
             }
             ModelCommand::DropToBuildPlate(id) => {
-                for (_, model, mut model_transform, _) in &mut models {
-                    if model.id == id {
-                        drop_model_to_build_plate(model, &mut model_transform);
-                        break;
+                if selected.primary() == Some(id) && selected.len() > 1 {
+                    for (_, model, mut model_transform, _) in &mut models {
+                        if selected.contains(model.id) {
+                            drop_model_to_build_plate(model, &mut model_transform);
+                        }
+                    }
+                } else {
+                    for (_, model, mut model_transform, _) in &mut models {
+                        if model.id == id {
+                            drop_model_to_build_plate(model, &mut model_transform);
+                            break;
+                        }
                     }
                 }
             }
@@ -152,8 +252,8 @@ pub(super) fn apply_model_commands(
                 for (entity, model, _, _) in &mut models {
                     if model.id == id {
                         commands.entity(entity).despawn();
-                        if selected.0 == Some(id) {
-                            selected.0 = None;
+                        if selected.contains(id) {
+                            selected.remove(id);
                             active_tool.set_mode(state::ToolModeSpec::None);
                         }
                         break;
@@ -164,12 +264,12 @@ pub(super) fn apply_model_commands(
                 for (entity, _, _, _) in &mut models {
                     commands.entity(entity).despawn();
                 }
-                selected.0 = None;
+                selected.clear();
                 active_tool.set_mode(state::ToolModeSpec::None);
             }
             ModelCommand::Select(id) => {
                 if models.iter_mut().any(|(_, model, _, _)| model.id == id) {
-                    selected.0 = Some(id);
+                    selected.set_single(id);
                 }
             }
         }
@@ -227,7 +327,9 @@ pub(super) fn update_api_state_from_scene(
     models: Query<(&ImportedModel, &Transform)>,
 ) {
     state::sync_api_state(
-        selected.0,
+        selected.ids().iter().copied(),
+        selected_world_bounds(&selected, &models)
+            .map(|(min, max)| (min.to_array(), max.to_array())),
         models.iter().map(|(model, transform)| {
             (
                 model.id,
@@ -247,6 +349,50 @@ pub(super) fn model_visual_center(model: &ImportedModel, transform: &Transform) 
         .bounds
         .map(|bounds| transform.transform_point(bounds.center))
         .unwrap_or(transform.translation)
+}
+
+pub(super) fn model_world_bounds(model: &ImportedModel, transform: &Transform) -> (Vec3, Vec3) {
+    let Some(bounds) = model.bounds else {
+        let half = Vec3::splat(0.5);
+        return (transform.translation - half, transform.translation + half);
+    };
+
+    let half = bounds.size * 0.5;
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for x in [-half.x, half.x] {
+        for y in [-half.y, half.y] {
+            for z in [-half.z, half.z] {
+                let point = transform.transform_point(bounds.center + Vec3::new(x, y, z));
+                min = min.min(point);
+                max = max.max(point);
+            }
+        }
+    }
+
+    (min, max)
+}
+
+pub(super) fn selected_world_bounds(
+    selected: &SelectedModel,
+    models: &Query<(&ImportedModel, &Transform)>,
+) -> Option<(Vec3, Vec3)> {
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    let mut found = false;
+
+    for (model, transform) in models {
+        if !selected.contains(model.id) {
+            continue;
+        }
+
+        let (model_min, model_max) = model_world_bounds(model, transform);
+        min = min.min(model_min);
+        max = max.max(model_max);
+        found = true;
+    }
+
+    found.then_some((min, max))
 }
 
 fn center_model_on_platform(transform: &mut Transform, local_center: Vec3) {
@@ -279,6 +425,134 @@ fn set_model_scale(model: &ImportedModel, transform: &mut Transform, scale: Vec3
     let center = model_visual_center(model, transform);
     transform.scale = scale;
     recenter_model_visual_center(model, transform, center);
+}
+
+fn selected_bounds_in_scene(
+    selected: &SelectedModel,
+    models: &mut Query<(
+        Entity,
+        &ImportedModel,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+) -> Option<(Vec3, Vec3)> {
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    let mut found = false;
+
+    for (_, model, transform, _) in models {
+        if !selected.contains(model.id) {
+            continue;
+        }
+
+        let (model_min, model_max) = model_world_bounds(model, &transform);
+        min = min.min(model_min);
+        max = max.max(model_max);
+        found = true;
+    }
+
+    found.then_some((min, max))
+}
+
+fn selected_center_and_primary_rotation(
+    primary_id: u32,
+    selected: &SelectedModel,
+    models: &mut Query<(
+        Entity,
+        &ImportedModel,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+) -> Option<(Vec3, Quat)> {
+    let (min, max) = selected_bounds_in_scene(selected, models)?;
+    let center = (min + max) * 0.5;
+    let primary_rotation = models
+        .iter_mut()
+        .find(|(_, model, _, _)| model.id == primary_id)
+        .map(|(_, _, transform, _)| transform.rotation)?;
+    Some((center, primary_rotation))
+}
+
+fn selected_center_and_primary_scale(
+    primary_id: u32,
+    selected: &SelectedModel,
+    models: &mut Query<(
+        Entity,
+        &ImportedModel,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+) -> Option<(Vec3, Vec3)> {
+    let (min, max) = selected_bounds_in_scene(selected, models)?;
+    let center = (min + max) * 0.5;
+    let primary_scale = models
+        .iter_mut()
+        .find(|(_, model, _, _)| model.id == primary_id)
+        .map(|(_, _, transform, _)| transform.scale)?;
+    Some((center, primary_scale))
+}
+
+fn translate_selected_models(
+    selected: &SelectedModel,
+    models: &mut Query<(
+        Entity,
+        &ImportedModel,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+    delta: Vec3,
+) {
+    for (_, model, mut transform, _) in models {
+        if selected.contains(model.id) {
+            transform.translation += delta;
+        }
+    }
+}
+
+fn rotate_selected_models(
+    selected: &SelectedModel,
+    models: &mut Query<(
+        Entity,
+        &ImportedModel,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+    center: Vec3,
+    delta: Quat,
+) {
+    for (_, model, mut transform, _) in models {
+        if selected.contains(model.id) {
+            transform.translation = center + delta * (transform.translation - center);
+            transform.rotation = delta * transform.rotation;
+        }
+    }
+}
+
+fn scale_selected_models(
+    selected: &SelectedModel,
+    models: &mut Query<(
+        Entity,
+        &ImportedModel,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+    center: Vec3,
+    factor: Vec3,
+) {
+    for (_, model, mut transform, _) in models {
+        if selected.contains(model.id) {
+            transform.translation = center + factor * (transform.translation - center);
+            transform.scale *= factor;
+        }
+    }
+}
+
+fn scale_factor_component(desired: f32, current: f32) -> f32 {
+    if current.abs() > 0.0001 {
+        desired / current
+    } else {
+        1.0
+    }
 }
 
 fn recenter_model_visual_center(model: &ImportedModel, transform: &mut Transform, center: Vec3) {

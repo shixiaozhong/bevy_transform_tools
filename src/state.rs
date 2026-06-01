@@ -184,7 +184,8 @@ impl ModelInfoSnapshot {
 #[derive(Default)]
 struct ApiState {
     next_id: u32,
-    selected: Option<u32>,
+    selected: Vec<u32>,
+    selected_bounds: Option<([f32; 3], [f32; 3])>,
     transforms: HashMap<u32, TransformSnapshot>,
     model_infos: HashMap<u32, ModelInfoSnapshot>,
     last_error: String,
@@ -229,22 +230,29 @@ pub(crate) fn remember_queued_model_transform(id: u32, transform: Transform) {
 }
 
 pub(crate) fn remember_selection(id: Option<u32>) {
-    let changed = API_STATE.with(|state| update_selected(&mut state.borrow_mut(), id));
+    let ids = id.into_iter().collect::<Vec<_>>();
+    remember_selected_models(ids);
+}
+
+pub(crate) fn remember_selected_models(ids: impl IntoIterator<Item = u32>) {
+    let ids = ids.into_iter().collect::<Vec<_>>();
+    let changed = API_STATE.with(|state| update_selected(&mut state.borrow_mut(), ids.clone()));
     if changed {
-        notify_selection_changed(id);
+        notify_selection_changed(&ids);
     }
 }
 
 pub(crate) fn clear_api_models() {
     let changed = API_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        let changed = update_selected(&mut state, None);
+        let changed = update_selected(&mut state, Vec::new());
+        state.selected_bounds = None;
         state.transforms.clear();
         state.model_infos.clear();
         changed
     });
     if changed {
-        notify_selection_changed(None);
+        notify_selection_changed(&[]);
     }
 }
 
@@ -253,37 +261,40 @@ pub(crate) fn forget_api_model(id: u32) {
         let mut state = state.borrow_mut();
         state.transforms.remove(&id);
         state.model_infos.remove(&id);
-        if state.selected == Some(id) {
-            update_selected(&mut state, None)
-        } else {
-            false
-        }
+        state.selected_bounds = None;
+        let mut ids = state.selected.clone();
+        ids.retain(|selected| *selected != id);
+        update_selected(&mut state, ids)
     });
     if changed {
-        notify_selection_changed(None);
+        let ids = selected_model_ids();
+        notify_selection_changed(&ids);
     }
 }
 
 pub(crate) fn sync_api_state(
-    selected: Option<u32>,
+    selected: impl IntoIterator<Item = u32>,
+    selected_bounds: Option<([f32; 3], [f32; 3])>,
     models: impl IntoIterator<Item = (u32, TransformSnapshot, ModelInfoSnapshot)>,
 ) {
+    let selected = selected.into_iter().collect::<Vec<_>>();
     let changed = API_STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.transforms.clear();
         state.model_infos.clear();
+        state.selected_bounds = selected_bounds;
         for (id, transform, info) in models {
             state.transforms.insert(id, transform);
             state.model_infos.insert(id, info);
         }
-        update_selected(&mut state, selected)
+        update_selected(&mut state, selected.clone())
     });
     if changed {
-        notify_selection_changed(selected);
+        notify_selection_changed(&selected);
     }
 }
 
-fn update_selected(state: &mut ApiState, selected: Option<u32>) -> bool {
+fn update_selected(state: &mut ApiState, selected: Vec<u32>) -> bool {
     if state.selected == selected {
         return false;
     }
@@ -292,32 +303,36 @@ fn update_selected(state: &mut ApiState, selected: Option<u32>) -> bool {
     true
 }
 
-fn notify_selection_changed(selected: Option<u32>) {
-    let selected_id = selected.unwrap_or(0);
-    dispatch_selection_changed(selected_id);
+fn notify_selection_changed(selected: &[u32]) {
+    let selected_id = selected.last().copied().unwrap_or(0);
+    dispatch_selection_changed(selected_id, &selected_ids_json(selected));
 }
 
 #[cfg(target_arch = "wasm32")]
-fn dispatch_selection_changed(selected_id: u32) {
-    browser_events::dispatch_selection_changed(selected_id);
+fn dispatch_selection_changed(selected_id: u32, selected_ids_json: &str) {
+    browser_events::dispatch_selection_changed(selected_id, selected_ids_json);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn dispatch_selection_changed(_selected_id: u32) {}
+fn dispatch_selection_changed(_selected_id: u32, _selected_ids_json: &str) {}
 
 #[cfg(target_arch = "wasm32")]
 mod browser_events {
     use wasm_bindgen::prelude::*;
 
     #[wasm_bindgen(
-        inline_js = "export function dispatch_selection_changed(selectedModelId) {
+        inline_js = "export function dispatch_selection_changed(selectedModelId, selectedModelIdsJson) {
+            const selectedModelIds = JSON.parse(selectedModelIdsJson);
             window.dispatchEvent(new CustomEvent('bevy-transform-tools:selection-change', {
-                detail: { selectedModelId }
+                detail: { selectedModelId, selectedModelIds }
             }));
         }"
     )]
     extern "C" {
-        pub(super) fn dispatch_selection_changed(selected_model_id: u32);
+        pub(super) fn dispatch_selection_changed(
+            selected_model_id: u32,
+            selected_model_ids_json: &str,
+        );
     }
 }
 
@@ -343,8 +358,32 @@ pub fn model_info_json(id: u32) -> String {
     })
 }
 
+pub fn selected_bounds_json() -> String {
+    API_STATE.with(|state| {
+        state
+            .borrow()
+            .selected_bounds
+            .map(|(min, max)| {
+                format!(
+                    "{{\"min\":[{},{},{}],\"max\":[{},{},{}]}}",
+                    min[0], min[1], min[2], max[0], max[1], max[2]
+                )
+            })
+            .unwrap_or_else(|| "null".to_string())
+    })
+}
+
 pub fn selected_model_id() -> u32 {
-    API_STATE.with(|state| state.borrow().selected.unwrap_or(0))
+    API_STATE.with(|state| state.borrow().selected.last().copied().unwrap_or(0))
+}
+
+pub fn selected_model_ids() -> Vec<u32> {
+    API_STATE.with(|state| state.borrow().selected.clone())
+}
+
+fn selected_ids_json(ids: &[u32]) -> String {
+    let values = ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+    format!("[{values}]")
 }
 
 pub fn last_error() -> String {
