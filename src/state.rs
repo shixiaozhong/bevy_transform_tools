@@ -275,17 +275,23 @@ pub(crate) fn forget_api_model(id: u32) {
 pub(crate) fn sync_api_state(
     selected: impl IntoIterator<Item = u32>,
     selected_bounds: Option<([f32; 3], [f32; 3])>,
-    models: impl IntoIterator<Item = (u32, TransformSnapshot, ModelInfoSnapshot)>,
+    models: impl IntoIterator<Item = (u32, TransformSnapshot, Option<ModelInfoSnapshot>)>,
 ) {
     let selected = selected.into_iter().collect::<Vec<_>>();
     let changed = API_STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.transforms.clear();
-        state.model_infos.clear();
         state.selected_bounds = selected_bounds;
+        let mut refreshed_model_infos = false;
         for (id, transform, info) in models {
             state.transforms.insert(id, transform);
-            state.model_infos.insert(id, info);
+            if let Some(info) = info {
+                if !refreshed_model_infos {
+                    state.model_infos.clear();
+                    refreshed_model_infos = true;
+                }
+                state.model_infos.insert(id, info);
+            }
         }
         update_selected(&mut state, selected.clone())
     });

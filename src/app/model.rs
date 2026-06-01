@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    interaction::{select_model_on_click, start_model_drag},
+    interaction::{GizmoDrag, select_model_on_click, start_model_drag},
     tool::ActiveTool,
 };
 
@@ -324,8 +324,11 @@ fn spawn_imported_model(
 
 pub(super) fn update_api_state_from_scene(
     selected: Res<SelectedModel>,
+    gizmo_drag: Res<GizmoDrag>,
+    model_drag: Res<ModelDrag>,
     models: Query<(&ImportedModel, &Transform)>,
 ) {
+    let refresh_model_info = !gizmo_drag.is_active() && model_drag.active.is_none();
     state::sync_api_state(
         selected.ids().iter().copied(),
         selected_world_bounds(&selected, &models)
@@ -338,7 +341,7 @@ pub(super) fn update_api_state_from_scene(
                     model_visual_center(model, transform),
                     world_rotation_to_print_degrees(transform.rotation),
                 ),
-                model_info_snapshot(model, transform),
+                refresh_model_info.then(|| model_info_snapshot(model, transform)),
             )
         }),
     );

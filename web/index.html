@@ -1286,7 +1286,7 @@
       };
 
       const updateModelInfoPanel = () => {
-        if (selectedModelId === 0) {
+        if (selectedModelId === 0 || selectedModelIds.length !== 1) {
           lastModelInfoJson = "";
           modelInfoPanel.hidden = true;
           modelInfoPanel.textContent = "";
