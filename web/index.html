@@ -429,24 +429,6 @@
           <span class="tool-label">移动</span>
         </button>
         <button
-          id="scale-tool"
-          class="tool-button"
-          type="button"
-          title="缩放"
-          aria-label="缩放"
-          data-requires-selection
-          disabled
-        >
-          <svg viewBox="0 0 64 64" aria-hidden="true">
-            <path d="M15 15h14M15 15v14M49 49H35M49 49V35" />
-            <path d="M20 20 30 30M44 44 34 34" />
-            <path d="M35 15h14v14M49 15 37 27" />
-            <path d="M15 35v14h14M15 49l12-12" />
-            <path d="M25 25h14v14H25Z" />
-          </svg>
-          <span class="tool-label">缩放</span>
-        </button>
-        <button
           id="rotate-tool"
           class="tool-button"
           type="button"
@@ -464,21 +446,22 @@
           <span class="tool-label">旋转</span>
         </button>
         <button
+          id="scale-tool"
           class="tool-button"
           type="button"
-          title="选择底面"
-          aria-label="选择底面"
+          title="缩放"
+          aria-label="缩放"
           data-requires-selection
           disabled
         >
           <svg viewBox="0 0 64 64" aria-hidden="true">
-            <path d="M16 18 32 9l16 9v20L32 47 16 38Z" />
-            <path d="M16 18 32 27l16-9" />
-            <path d="M32 27v20" />
-            <path d="M18 40 32 32l14 8-14 8Z" />
-            <path d="M22 50h20" />
+            <path d="M15 15h14M15 15v14M49 49H35M49 49V35" />
+            <path d="M20 20 30 30M44 44 34 34" />
+            <path d="M35 15h14v14M49 15 37 27" />
+            <path d="M15 35v14h14M15 49l12-12" />
+            <path d="M25 25h14v14H25Z" />
           </svg>
-          <span class="tool-label">选择底面</span>
+          <span class="tool-label">缩放</span>
         </button>
         <button
           class="tool-button"
@@ -533,6 +516,23 @@
             <path d="M13 56h38" />
           </svg>
           <span class="tool-label">贴底面</span>
+        </button>
+        <button
+          class="tool-button"
+          type="button"
+          title="选择底面"
+          aria-label="选择底面"
+          data-requires-selection
+          disabled
+        >
+          <svg viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M16 18 32 9l16 9v20L32 47 16 38Z" />
+            <path d="M16 18 32 27l16-9" />
+            <path d="M32 27v20" />
+            <path d="M18 40 32 32l14 8-14 8Z" />
+            <path d="M22 50h20" />
+          </svg>
+          <span class="tool-label">选择底面</span>
         </button>
         <button
           id="color-model"
