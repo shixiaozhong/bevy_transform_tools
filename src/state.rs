@@ -185,6 +185,7 @@ impl ModelInfoSnapshot {
 struct ApiState {
     next_id: u32,
     selected: Vec<u32>,
+    active_tool: ToolModeSpec,
     selected_bounds: Option<([f32; 3], [f32; 3])>,
     transforms: HashMap<u32, TransformSnapshot>,
     model_infos: HashMap<u32, ModelInfoSnapshot>,
@@ -242,10 +243,18 @@ pub(crate) fn remember_selected_models(ids: impl IntoIterator<Item = u32>) {
     }
 }
 
+pub(crate) fn remember_active_tool(mode: ToolModeSpec) {
+    let changed = API_STATE.with(|state| update_active_tool(&mut state.borrow_mut(), mode));
+    if changed {
+        notify_tool_changed(mode);
+    }
+}
+
 pub(crate) fn clear_api_models() {
     let changed = API_STATE.with(|state| {
         let mut state = state.borrow_mut();
         let changed = update_selected(&mut state, Vec::new());
+        state.active_tool = ToolModeSpec::None;
         state.selected_bounds = None;
         state.transforms.clear();
         state.model_infos.clear();
@@ -254,6 +263,7 @@ pub(crate) fn clear_api_models() {
     if changed {
         notify_selection_changed(&[]);
     }
+    notify_tool_changed(ToolModeSpec::None);
 }
 
 pub(crate) fn forget_api_model(id: u32) {
@@ -309,9 +319,22 @@ fn update_selected(state: &mut ApiState, selected: Vec<u32>) -> bool {
     true
 }
 
+fn update_active_tool(state: &mut ApiState, mode: ToolModeSpec) -> bool {
+    if state.active_tool == mode {
+        return false;
+    }
+
+    state.active_tool = mode;
+    true
+}
+
 fn notify_selection_changed(selected: &[u32]) {
     let selected_id = selected.last().copied().unwrap_or(0);
     dispatch_selection_changed(selected_id, &selected_ids_json(selected));
+}
+
+fn notify_tool_changed(mode: ToolModeSpec) {
+    dispatch_tool_changed(tool_mode_json(mode));
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -323,6 +346,14 @@ fn dispatch_selection_changed(selected_id: u32, selected_ids_json: &str) {
 fn dispatch_selection_changed(_selected_id: u32, _selected_ids_json: &str) {}
 
 #[cfg(target_arch = "wasm32")]
+fn dispatch_tool_changed(active_tool_json: &str) {
+    browser_events::dispatch_tool_changed(active_tool_json);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dispatch_tool_changed(_active_tool_json: &str) {}
+
+#[cfg(target_arch = "wasm32")]
 mod browser_events {
     use wasm_bindgen::prelude::*;
 
@@ -332,6 +363,13 @@ mod browser_events {
             window.dispatchEvent(new CustomEvent('bevy-transform-tools:selection-change', {
                 detail: { selectedModelId, selectedModelIds }
             }));
+        }
+
+        export function dispatch_tool_changed(activeToolJson) {
+            const activeTool = JSON.parse(activeToolJson);
+            window.dispatchEvent(new CustomEvent('bevy-transform-tools:tool-change', {
+                detail: { activeTool }
+            }));
         }"
     )]
     extern "C" {
@@ -339,6 +377,7 @@ mod browser_events {
             selected_model_id: u32,
             selected_model_ids_json: &str,
         );
+        pub(super) fn dispatch_tool_changed(active_tool_json: &str);
     }
 }
 
@@ -390,6 +429,15 @@ pub fn selected_model_ids() -> Vec<u32> {
 fn selected_ids_json(ids: &[u32]) -> String {
     let values = ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
     format!("[{values}]")
+}
+
+fn tool_mode_json(mode: ToolModeSpec) -> &'static str {
+    match mode {
+        ToolModeSpec::None => "null",
+        ToolModeSpec::Move => "\"move\"",
+        ToolModeSpec::Rotate => "\"rotate\"",
+        ToolModeSpec::Scale => "\"scale\"",
+    }
 }
 
 pub fn last_error() -> String {

@@ -6,23 +6,29 @@ use bevy::{
 };
 
 mod camera;
+mod coordinates;
 mod drawing;
+mod gizmo_draw;
+mod gizmo_interaction;
+mod gizmo_layout;
 mod interaction;
 mod model;
+mod orientation;
 mod scene;
+mod selection;
 mod tool;
 
 use camera::{OrbitDrag, orbit_camera};
-use drawing::{
-    OrientationGizmos, OrientationInteraction, draw_grid_and_selection, draw_orientation_overlay,
-    orient_camera_from_cube_click, update_orientation_camera, update_orientation_interaction,
-    update_rotation_angle_label,
+use drawing::{draw_grid_and_selection, update_rotation_angle_label};
+use gizmo_interaction::{
+    GizmoDrag, RotateGizmoHover, begin_gizmo_drag, update_gizmo_drag, update_rotate_gizmo_hover,
 };
-use interaction::{
-    GizmoDrag, RotateGizmoHover, begin_move_gizmo_drag, clear_selection_on_non_model_click,
-    update_model_drag, update_move_gizmo_drag, update_rotate_gizmo_hover,
-};
+use interaction::{clear_selection_on_non_model_click, update_model_drag};
 use model::{ModelDrag, SelectedModel, apply_model_commands, update_api_state_from_scene};
+use orientation::{
+    OrientationGizmos, OrientationInteraction, draw_orientation_overlay,
+    orient_camera_from_cube_click, update_orientation_camera, update_orientation_interaction,
+};
 use scene::{setup_scene, sync_camera_fill_light};
 use tool::ActiveTool;
 
@@ -82,9 +88,9 @@ pub fn run_app() {
             Update,
             (
                 apply_model_commands,
-                begin_move_gizmo_drag,
+                begin_gizmo_drag,
                 update_rotate_gizmo_hover,
-                update_move_gizmo_drag,
+                update_gizmo_drag,
                 update_model_drag,
                 orbit_camera,
                 sync_camera_fill_light,

@@ -729,6 +729,72 @@
       let scaleBaseSize = [0, 0, 0];
       let isSyncingScalePanel = false;
 
+      const modelCommands = {
+        async importFile(file) {
+          const extension = file.name.split(".").pop()?.toLowerCase();
+          if (extension === "obj") {
+            load_obj_model(file.name, await file.text());
+          } else if (extension === "stl") {
+            load_stl_model(file.name, new Uint8Array(await file.arrayBuffer()));
+          }
+        },
+        activateTool(tool) {
+          if (tool === "move") {
+            activate_move_tool_mode();
+          } else if (tool === "rotate") {
+            activate_rotate_tool_mode();
+          } else if (tool === "scale") {
+            activate_scale_tool_mode();
+          }
+        },
+        clearTool() {
+          clear_tool_mode();
+        },
+        setColor(id, hexColor) {
+          const color = parseHexColor(hexColor);
+          set_color(id, color.red, color.green, color.blue);
+        },
+        center(id) {
+          center_model(id);
+        },
+        dropToPlatform(id) {
+          drop_model_to_platform(id);
+        },
+        delete(id) {
+          delete_model(id);
+        },
+        setPosition(id, platformPosition) {
+          const [x, y, z] = platformToWorldPosition(platformPosition);
+          set_position(id, x, y, z);
+        },
+        moveBy(id, platformDelta) {
+          const [x, y, z] = platformToWorldDelta(platformDelta);
+          move_by(id, x, y, z);
+        },
+        rotateBy(id, degrees) {
+          rotate_by_degrees(id, degrees[0], degrees[1], degrees[2]);
+        },
+        setRotation(id, degrees) {
+          set_rotation(id, degrees[0], degrees[1], degrees[2]);
+        },
+        setScale(id, platformScalePercent) {
+          const [x, y, z] = platformScalePercent;
+          set_scale(id, x / 100, z / 100, y / 100);
+        },
+        setRotateFocusAxis(axis) {
+          set_rotate_focus_axis(axis);
+        },
+        selectedTransformJson(id) {
+          return get_model_transform_json(id);
+        },
+        selectedBoundsJson() {
+          return get_selected_bounds_json();
+        },
+        modelInfoJson(id) {
+          return get_model_info_json(id);
+        },
+      };
+
       importButton.addEventListener("click", () => {
         fileInput.click();
       });
@@ -737,12 +803,7 @@
         const file = fileInput.files?.[0];
         if (!file) return;
 
-        const extension = file.name.split(".").pop()?.toLowerCase();
-        if (extension === "obj") {
-          load_obj_model(file.name, await file.text());
-        } else if (extension === "stl") {
-          load_stl_model(file.name, new Uint8Array(await file.arrayBuffer()));
-        }
+        await modelCommands.importFile(file);
 
         fileInput.value = "";
       });
@@ -753,12 +814,9 @@
         }
 
         if (activeTool === "move") {
-          clear_tool_mode();
-          setActiveToolButton(null);
+          modelCommands.clearTool();
         } else {
-          activate_move_tool_mode();
-          setActiveToolButton("move");
-          syncMovePanelFromSelection();
+          modelCommands.activateTool("move");
         }
       });
 
@@ -768,12 +826,9 @@
         }
 
         if (activeTool === "rotate") {
-          clear_tool_mode();
-          setActiveToolButton(null);
+          modelCommands.clearTool();
         } else {
-          activate_rotate_tool_mode();
-          setActiveToolButton("rotate");
-          syncRotatePanelFromSelection();
+          modelCommands.activateTool("rotate");
         }
       });
 
@@ -783,12 +838,9 @@
         }
 
         if (activeTool === "scale") {
-          clear_tool_mode();
-          setActiveToolButton(null);
+          modelCommands.clearTool();
         } else {
-          activate_scale_tool_mode();
-          setActiveToolButton("scale");
-          syncScalePanelFromSelection();
+          modelCommands.activateTool("scale");
         }
       });
 
@@ -803,23 +855,22 @@
           return;
         }
 
-        const color = parseHexColor(colorInput.value);
         document.documentElement.style.setProperty(
           "--model-color",
           colorInput.value,
         );
-        set_color(selectedModelId, color.red, color.green, color.blue);
+        modelCommands.setColor(selectedModelId, colorInput.value);
       });
 
       centerButton.addEventListener("click", () => {
         if (selectedModelId !== 0) {
-          center_model(selectedModelId);
+          modelCommands.center(selectedModelId);
         }
       });
 
       dropButton.addEventListener("click", () => {
         if (selectedModelId !== 0) {
-          drop_model_to_platform(selectedModelId);
+          modelCommands.dropToPlatform(selectedModelId);
         }
       });
 
@@ -830,12 +881,11 @@
 
         const ids = [...selectedModelIds];
         for (const id of ids) {
-          delete_model(id);
+          modelCommands.delete(id);
         }
         selectedModelId = 0;
         selectedModelIds = [];
         lastModelInfoJson = "";
-        setActiveToolButton(null);
         syncToolAvailability();
         updateModelInfoPanel();
       });
@@ -879,12 +929,12 @@
       const rotateInputs = [rotateXInput, rotateYInput, rotateZInput];
       rotateInputs.forEach((input, axis) => {
         input.addEventListener("focus", () => {
-          set_rotate_focus_axis(axis);
+          modelCommands.setRotateFocusAxis(axis);
         });
         input.addEventListener("blur", () => {
           setTimeout(() => {
             if (!rotateInputs.includes(document.activeElement)) {
-              set_rotate_focus_axis(-1);
+              modelCommands.setRotateFocusAxis(-1);
             }
           }, 0);
         });
@@ -934,9 +984,6 @@
         for (const button of selectionTools) {
           button.disabled = !hasSelection;
         }
-        if (!hasSelection) {
-          setActiveToolButton(null);
-        }
       };
 
       const formatFixed = (value, digits) =>
@@ -962,7 +1009,7 @@
           return null;
         }
 
-        const transformJson = get_model_transform_json(selectedModelId);
+        const transformJson = modelCommands.selectedTransformJson(selectedModelId);
         if (!transformJson || transformJson === "null") {
           return null;
         }
@@ -1004,7 +1051,7 @@
           return [0, 0, 0];
         }
 
-        const infoJson = get_model_info_json(selectedModelId);
+        const infoJson = modelCommands.modelInfoJson(selectedModelId);
         if (!infoJson || infoJson === "null") {
           return [0, 0, 0];
         }
@@ -1019,7 +1066,7 @@
           return null;
         }
 
-        const boundsJson = get_selected_bounds_json();
+        const boundsJson = modelCommands.selectedBoundsJson();
         if (!boundsJson || boundsJson === "null") {
           return null;
         }
@@ -1057,13 +1104,11 @@
       const platformToWorldDelta = ([x = 0, y = 0, z = 0]) => [x, z, -y];
 
       const applyWorldPosition = (id, platformPosition) => {
-        const [x, y, z] = platformToWorldPosition(platformPosition);
-        set_position(id, x, y, z);
+        modelCommands.setPosition(id, platformPosition);
       };
 
       const applyWorldDelta = (id, platformDelta) => {
-        const [x, y, z] = platformToWorldDelta(platformDelta);
-        move_by(id, x, y, z);
+        modelCommands.moveBy(id, platformDelta);
       };
 
       const syncMovePanelFromSelection = (force = false) => {
@@ -1124,7 +1169,7 @@
         const visible = activeTool === "rotate" && selectedModelId !== 0;
         rotatePanel.hidden = !visible;
         if (!visible) {
-          set_rotate_focus_axis(-1);
+          modelCommands.setRotateFocusAxis(-1);
           return;
         }
 
@@ -1161,13 +1206,13 @@
 
         if (rotateModeSelect.value === "relative") {
           const [currentX, currentY, currentZ] = selectedRotation();
-          rotate_by_degrees(selectedModelId, x, y, z);
+          modelCommands.rotateBy(selectedModelId, [x, y, z]);
           rotateXInput.value = "0.00";
           rotateYInput.value = "0.00";
           rotateZInput.value = "0.00";
           rotateCurrent.textContent = `当前角度：${formatFixed(normalizeDegrees(currentX + x), 2)}, ${formatFixed(normalizeDegrees(currentY + y), 2)}, ${formatFixed(normalizeDegrees(currentZ + z), 2)}°`;
         } else {
-          set_rotation(selectedModelId, x, y, z);
+          modelCommands.setRotation(selectedModelId, [x, y, z]);
           rotateXInput.value = formatFixed(x, 2);
           rotateYInput.value = formatFixed(y, 2);
           rotateZInput.value = formatFixed(z, 2);
@@ -1280,7 +1325,7 @@
 
         const [x, y, z] = readScalePercents();
         const sizes = sizesFromScalePercents([x, y, z]);
-        set_scale(selectedModelId, x / 100, z / 100, y / 100);
+        modelCommands.setScale(selectedModelId, [x, y, z]);
         writeScalePercents([x, y, z]);
         writeScaleSizes(sizes);
       };
@@ -1293,7 +1338,7 @@
           return;
         }
 
-        const infoJson = get_model_info_json(selectedModelId);
+        const infoJson = modelCommands.modelInfoJson(selectedModelId);
         if (!infoJson || infoJson === "null") {
           lastModelInfoJson = "";
           modelInfoPanel.hidden = true;
@@ -1348,6 +1393,9 @@
           updateModelInfoPanel();
         },
       );
+      window.addEventListener("bevy-transform-tools:tool-change", (event) => {
+        setActiveToolButton(event.detail?.activeTool ?? null);
+      });
       syncToolAvailability();
       scheduleModelInfoRefresh();
     </script>

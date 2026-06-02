@@ -9,7 +9,8 @@ use bevy::{
 use super::{
     CAMERA_DISTANCE_SCALE, CAMERA_MAX_DISTANCE_SCALE, CAMERA_PITCH, CAMERA_YAW, GRID_HALF_EXTENT,
     ORBIT_INERTIA_DAMPING, ORBIT_SENSITIVITY, ORBIT_VELOCITY_EPSILON,
-    interaction::{GizmoDrag, pointer_is_over_model},
+    gizmo_interaction::GizmoDrag,
+    interaction::pointer_is_over_model,
     model::{ImportedModel, ModelDrag},
 };
 

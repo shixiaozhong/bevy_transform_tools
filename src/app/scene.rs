@@ -2,7 +2,8 @@ use bevy::prelude::*;
 
 use super::{
     camera::{OrbitCamera, spawn_orbit_camera},
-    drawing::spawn_orientation_overlay,
+    drawing::spawn_drawing_overlays,
+    orientation::spawn_orientation_overlay,
 };
 
 #[derive(Component)]
@@ -61,6 +62,7 @@ pub(super) fn setup_scene(
         &mut images,
         &asset_server,
     );
+    spawn_drawing_overlays(&mut commands, &mut meshes, &mut materials);
 }
 
 pub(super) fn sync_camera_fill_light(
