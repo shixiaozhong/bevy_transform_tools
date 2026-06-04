@@ -142,6 +142,7 @@ mod tests {
         ImportedModel {
             id,
             name: format!("model-{id}"),
+            mesh: Default::default(),
             bounds: Some(bounds),
             triangle_count: 12,
             volume: 1.0,

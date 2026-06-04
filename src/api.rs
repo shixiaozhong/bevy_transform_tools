@@ -1,9 +1,12 @@
 use crate::{
     importers::{load_obj_mesh, load_stl_mesh},
-    mesh::MeshData,
+    mesh::{
+        MeshData,
+        clip::{CutAxis, CutKeep, CutPlane},
+    },
     state::{
-        self, ModelCommand, ToolModeSpec, TransformSpec, clear_api_models, push_command,
-        record_error, remember_queued_model_transform, remember_selection,
+        self, CutPreviewUpdate, ModelCommand, ToolModeSpec, TransformSpec, clear_api_models,
+        push_command, record_error, remember_queued_model_transform, remember_selection,
     },
 };
 
@@ -40,6 +43,23 @@ pub fn drop_model_to_build_plate(id: u32) {
     push_command(ModelCommand::DropToBuildPlate(id));
 }
 
+pub fn cut_model(id: u32, axis: i32, position: f32, keep: i32, cap: bool) -> Result<u32, String> {
+    let axis = parse_cut_axis(axis)?;
+    let keep = parse_cut_keep(keep)?;
+    let new_id = (keep == CutKeep::Both).then(state::allocate_model_id);
+    push_command(ModelCommand::Cut {
+        id,
+        plane: CutPlane {
+            axis,
+            position: sanitize_position_component(position),
+        },
+        keep,
+        cap,
+        new_id,
+    });
+    Ok(new_id.unwrap_or(0))
+}
+
 pub fn activate_move_tool() {
     push_command(ModelCommand::SetActiveTool(ToolModeSpec::Move));
 }
@@ -54,6 +74,25 @@ pub fn activate_scale_tool() {
 
 pub fn clear_active_tool() {
     push_command(ModelCommand::SetActiveTool(ToolModeSpec::None));
+}
+
+pub fn set_cut_preview_plane(axis: i32, position: f32, visible: bool) -> Result<(), String> {
+    let axis = parse_cut_axis(axis)?;
+    state::set_cut_preview(CutPreviewUpdate {
+        visible,
+        plane: Some(CutPlane {
+            axis,
+            position: sanitize_position_component(position),
+        }),
+    });
+    Ok(())
+}
+
+pub fn clear_cut_preview_plane() {
+    state::set_cut_preview(CutPreviewUpdate {
+        visible: false,
+        plane: None,
+    });
 }
 
 pub fn set_model_color(id: u32, red: f32, green: f32, blue: f32) {
@@ -148,6 +187,24 @@ fn sanitize_scale_component(value: f32) -> f32 {
     }
 }
 
+fn parse_cut_axis(axis: i32) -> Result<CutAxis, String> {
+    match axis {
+        0 => Ok(CutAxis::X),
+        1 => Ok(CutAxis::Y),
+        2 => Ok(CutAxis::Z),
+        _ => Err(record_error(format!("invalid cut axis {axis}"))),
+    }
+}
+
+fn parse_cut_keep(keep: i32) -> Result<CutKeep, String> {
+    match keep {
+        0 => Ok(CutKeep::Upper),
+        1 => Ok(CutKeep::Lower),
+        2 => Ok(CutKeep::Both),
+        _ => Err(record_error(format!("invalid cut keep mode {keep}"))),
+    }
+}
+
 fn queue_mesh_model(name: String, mesh: MeshData) -> Result<u32, String> {
     let id = state::allocate_model_id();
     let transform = TransformSpec::default();
@@ -208,6 +265,17 @@ mod wasm {
     }
 
     #[wasm_bindgen]
+    pub fn cut_model_by_plane(
+        id: u32,
+        axis: i32,
+        position: f32,
+        keep: i32,
+        cap: bool,
+    ) -> Result<u32, JsValue> {
+        cut_model(id, axis, position, keep, cap).map_err(|error| JsValue::from_str(&error))
+    }
+
+    #[wasm_bindgen]
     pub fn activate_move_tool_mode() {
         activate_move_tool();
     }
@@ -225,6 +293,20 @@ mod wasm {
     #[wasm_bindgen]
     pub fn clear_tool_mode() {
         clear_active_tool();
+    }
+
+    #[wasm_bindgen]
+    pub fn set_cut_preview_plane_by_axis(
+        axis: i32,
+        position: f32,
+        visible: bool,
+    ) -> Result<(), JsValue> {
+        set_cut_preview_plane(axis, position, visible).map_err(|error| JsValue::from_str(&error))
+    }
+
+    #[wasm_bindgen]
+    pub fn clear_cut_preview() {
+        clear_cut_preview_plane();
     }
 
     #[wasm_bindgen]

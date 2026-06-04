@@ -4,7 +4,7 @@ use crate::state::{self, ModelCommand};
 
 use super::{
     ImportedModel, SelectedModel,
-    spawn::spawn_imported_model,
+    spawn::{imported_model_metadata, spawn_cut_model, spawn_imported_model},
     transform::{
         center_model_on_origin, drop_model_to_build_plate, model_visual_center, set_model_rotation,
         set_model_scale,
@@ -18,6 +18,10 @@ use crate::app::{
         selected_center_and_primary_scale, translate_selected_models,
     },
     tool::ActiveTool,
+};
+use crate::mesh::{
+    MeshData,
+    clip::{CutKeep, CutPlane, cut_mesh},
 };
 
 pub(in crate::app) fn apply_model_commands(
@@ -192,6 +196,25 @@ pub(in crate::app) fn apply_model_commands(
                     }
                 }
             }
+            ModelCommand::Cut {
+                id,
+                plane,
+                keep,
+                cap,
+                new_id,
+            } => {
+                cut_model_by_plane(
+                    &mut commands,
+                    &mut meshes,
+                    &mut selected,
+                    &mut models,
+                    id,
+                    plane,
+                    keep,
+                    cap,
+                    new_id,
+                );
+            }
             ModelCommand::SetActiveTool(mode) => set_active_tool(&mut active_tool, mode),
             ModelCommand::Remove(id) => {
                 for (entity, model, _, _) in &mut models {
@@ -221,6 +244,138 @@ pub(in crate::app) fn apply_model_commands(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn cut_model_by_plane(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    selected: &mut SelectedModel,
+    models: &mut Query<(
+        Entity,
+        &ImportedModel,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+    id: u32,
+    plane: CutPlane,
+    keep: CutKeep,
+    cap: bool,
+    new_id: Option<u32>,
+) {
+    for (entity, model, mut transform, material) in models {
+        if model.id != id {
+            continue;
+        }
+
+        let world_mesh = transform_mesh(&model.mesh, &transform);
+        let Ok(result) = cut_mesh(&world_mesh, plane, cap) else {
+            return;
+        };
+        if !result.warnings.is_empty() {
+            state::record_error(format!(
+                "cut completed with warnings: {:?}",
+                result.warnings
+            ));
+        }
+
+        match keep {
+            CutKeep::Upper => {
+                replace_or_remove_model(
+                    commands,
+                    meshes,
+                    selected,
+                    entity,
+                    model.id,
+                    model.name.clone(),
+                    result.upper,
+                );
+                *transform = Transform::IDENTITY;
+            }
+            CutKeep::Lower => {
+                replace_or_remove_model(
+                    commands,
+                    meshes,
+                    selected,
+                    entity,
+                    model.id,
+                    model.name.clone(),
+                    result.lower,
+                );
+                *transform = Transform::IDENTITY;
+            }
+            CutKeep::Both => {
+                replace_or_remove_model(
+                    commands,
+                    meshes,
+                    selected,
+                    entity,
+                    model.id,
+                    format!("{} lower", model.name),
+                    result.lower,
+                );
+                *transform = Transform::IDENTITY;
+                if let (Some(id), Some(upper)) = (new_id, result.upper) {
+                    spawn_cut_model(
+                        commands,
+                        meshes,
+                        id,
+                        format!("{} upper", model.name),
+                        upper,
+                        material.clone(),
+                    );
+                }
+            }
+        }
+        break;
+    }
+}
+
+fn replace_or_remove_model(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    selected: &mut SelectedModel,
+    entity: Entity,
+    id: u32,
+    name: String,
+    mesh: Option<MeshData>,
+) {
+    if let Some(mesh) = mesh {
+        commands.entity(entity).insert((
+            Mesh3d(meshes.add(mesh.clone().into_mesh())),
+            Name::new(name.clone()),
+            imported_model_metadata(id, name, mesh),
+        ));
+    } else {
+        commands.entity(entity).despawn();
+        selected.remove(id);
+        state::remember_selected_models(selected.ids().iter().copied());
+    }
+}
+
+fn transform_mesh(mesh: &MeshData, transform: &Transform) -> MeshData {
+    let normal_rotation = transform.rotation;
+    MeshData {
+        positions: mesh
+            .positions
+            .iter()
+            .map(|position| {
+                transform
+                    .transform_point(Vec3::from_array(*position))
+                    .to_array()
+            })
+            .collect(),
+        normals: mesh
+            .normals
+            .iter()
+            .map(|normal| {
+                (normal_rotation * Vec3::from_array(*normal))
+                    .normalize_or_zero()
+                    .to_array()
+            })
+            .collect(),
+        uvs: mesh.uvs.clone(),
+    }
+}
+
 fn set_active_tool(active_tool: &mut ActiveTool, mode: state::ToolModeSpec) {
     active_tool.set_mode(mode);
     state::remember_active_tool(mode);
@@ -231,7 +386,10 @@ mod tests {
     use super::*;
     use crate::{
         app::tool::ActiveTool,
-        mesh::MeshBounds,
+        mesh::{
+            MeshBounds, MeshData,
+            clip::{CutAxis, CutKeep, CutPlane},
+        },
         state::{self, ModelCommand},
     };
     use bevy::ecs::system::RunSystemOnce;
@@ -240,6 +398,7 @@ mod tests {
         ImportedModel {
             id,
             name: format!("model-{id}"),
+            mesh: Default::default(),
             bounds: Some(bounds),
             triangle_count: 12,
             volume: 1.0,
@@ -323,6 +482,50 @@ mod tests {
             .unwrap()
     }
 
+    fn model_snapshot(app: &mut App, id: u32) -> (Option<MeshBounds>, f64, Transform) {
+        let world = app.world_mut();
+        let mut models = world.query::<(&ImportedModel, &Transform)>();
+        models
+            .iter(world)
+            .find(|(model, _)| model.id == id)
+            .map(|(model, transform)| (model.bounds, model.volume, *transform))
+            .unwrap()
+    }
+
+    fn cube_mesh() -> MeshData {
+        let p = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
+        ];
+        let triangles = [
+            [0, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
+        ];
+        let mut mesh = MeshData::default();
+        for triangle in triangles {
+            for index in triangle {
+                mesh.positions.push(p[index]);
+            }
+        }
+        mesh
+    }
+
     #[test]
     fn set_translation_moves_selected_group_center() {
         let mut app = selected_command_app([Vec3::ZERO, Vec3::new(4.0, 0.0, 0.0)]);
@@ -393,5 +596,60 @@ mod tests {
 
         assert_vec3_close(model_translation(&mut app, 1), Vec3::new(0.0, 1.0, 0.0));
         assert_vec3_close(model_translation(&mut app, 2), Vec3::new(4.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn cut_command_replaces_model_with_capped_half() {
+        let _ = state::drain_commands();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(SelectedModel::default());
+        app.insert_resource(ActiveTool::default());
+
+        let material = {
+            let mut materials = app.world_mut().resource_mut::<Assets<StandardMaterial>>();
+            materials.add(StandardMaterial::default())
+        };
+        let mesh = cube_mesh();
+        app.world_mut().spawn((
+            test_model(
+                1,
+                MeshBounds {
+                    center: Vec3::splat(0.5),
+                    size: Vec3::ONE,
+                },
+            ),
+            Transform::IDENTITY,
+            MeshMaterial3d(material),
+        ));
+        {
+            let mut model = app
+                .world_mut()
+                .query::<&mut ImportedModel>()
+                .single_mut(app.world_mut())
+                .unwrap();
+            model.mesh = mesh;
+        }
+
+        run_command(
+            &mut app,
+            ModelCommand::Cut {
+                id: 1,
+                plane: CutPlane {
+                    axis: CutAxis::Z,
+                    position: 0.5,
+                },
+                keep: CutKeep::Upper,
+                cap: true,
+                new_id: None,
+            },
+        );
+
+        let (bounds, volume, transform) = model_snapshot(&mut app, 1);
+        assert_vec3_close(bounds.unwrap().size, Vec3::new(1.0, 1.0, 0.5));
+        assert_close(volume as f32, 0.5);
+        assert_vec3_close(transform.translation, Vec3::ZERO);
     }
 }

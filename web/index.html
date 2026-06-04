@@ -294,6 +294,27 @@
         border-top: 1px solid rgb(255 255 255 / 10%);
       }
 
+      #cut-panel {
+        width: min(820px, calc(100vw - 28px));
+      }
+
+      #cut-panel .move-panel-grid {
+        grid-template-columns: 120px max-content minmax(120px, 1fr) 44px 132px 72px;
+      }
+
+      #cut-keep {
+        width: 132px;
+      }
+
+      #cut-slider {
+        flex: 1 1 220px;
+        min-width: 120px;
+      }
+
+      #cut-current {
+        white-space: nowrap;
+      }
+
       .move-chip {
         height: 24px;
         padding: 0 9px;
@@ -383,6 +404,22 @@
           grid-column: 1 / -1;
         }
 
+        #cut-panel .move-panel-grid {
+          grid-template-columns: 88px max-content minmax(72px, 1fr) 32px;
+        }
+
+        #cut-keep {
+          grid-column: 1 / 3;
+          width: 100%;
+        }
+
+        #cut-apply {
+          grid-column: 3 / 5;
+        }
+
+        #cut-panel .move-secondary {
+          flex-wrap: wrap;
+        }
       }
     </style>
   </head>
@@ -464,6 +501,7 @@
           <span class="tool-label">缩放</span>
         </button>
         <button
+          id="cut-model"
           class="tool-button"
           type="button"
           title="剪切"
@@ -640,6 +678,33 @@
       </div>
     </div>
 
+    <div id="cut-panel" class="move-panel" hidden>
+      <div class="move-panel-grid">
+        <select id="cut-axis" class="move-mode-select" aria-label="剪切轴">
+          <option value="0">X 轴</option>
+          <option value="1">Y 轴</option>
+          <option value="2">Z 轴</option>
+        </select>
+        <div class="move-row-label">位置</div>
+        <input id="cut-position" class="move-number" type="number" step="0.01" />
+        <div class="move-unit">mm</div>
+        <select id="cut-keep" class="move-mode-select" aria-label="保留方式">
+          <option value="2">保留两边</option>
+          <option value="0">保留正向</option>
+          <option value="1">保留负向</option>
+        </select>
+        <button id="cut-apply" class="move-apply" type="button">应用</button>
+        <div class="move-secondary">
+          <input id="cut-slider" type="range" min="0" max="1" step="0.01" value="0" />
+          <label class="panel-checkbox">
+            <input id="cut-cap" type="checkbox" checked />
+            补盖截面
+          </label>
+          <span id="cut-current" class="move-row-label"></span>
+        </div>
+      </div>
+    </div>
+
     <div id="model-info-panel" class="model-info-panel" hidden></div>
 
     <script type="module">
@@ -649,6 +714,8 @@
         activate_scale_tool_mode,
         center_model,
         clear_tool_mode,
+        clear_cut_preview,
+        cut_model_by_plane,
         delete_model,
         drop_model_to_platform,
         get_model_info_json,
@@ -660,6 +727,7 @@
         rotate_by_degrees,
         set_color,
         set_position,
+        set_cut_preview_plane_by_axis,
         set_rotate_focus_axis,
         set_rotation,
         set_scale,
@@ -688,6 +756,7 @@
       const moveButton = document.querySelector("#move-tool");
       const scaleButton = document.querySelector("#scale-tool");
       const rotateButton = document.querySelector("#rotate-tool");
+      const cutButton = document.querySelector("#cut-model");
       const colorButton = document.querySelector("#color-model");
       const colorInput = document.querySelector("#model-color");
       const centerButton = document.querySelector("#center-model");
@@ -720,6 +789,14 @@
       const sizeZInput = document.querySelector("#size-z");
       const scaleApplyButton = document.querySelector("#scale-apply");
       const scaleUniformInput = document.querySelector("#scale-uniform");
+      const cutPanel = document.querySelector("#cut-panel");
+      const cutAxisSelect = document.querySelector("#cut-axis");
+      const cutPositionInput = document.querySelector("#cut-position");
+      const cutPositionSlider = document.querySelector("#cut-slider");
+      const cutKeepSelect = document.querySelector("#cut-keep");
+      const cutCapInput = document.querySelector("#cut-cap");
+      const cutApplyButton = document.querySelector("#cut-apply");
+      const cutCurrent = document.querySelector("#cut-current");
       const modelInfoPanel = document.querySelector("#model-info-panel");
       const selectionTools = document.querySelectorAll(
         "[data-requires-selection]",
@@ -728,6 +805,8 @@
       let lastModelInfoJson = "";
       let scaleBaseSize = [0, 0, 0];
       let isSyncingScalePanel = false;
+      let cutPanelOpen = false;
+      let cutPositionByAxis = [null, null, null];
 
       const modelCommands = {
         async importFile(file) {
@@ -759,6 +838,25 @@
         },
         dropToPlatform(id) {
           drop_model_to_platform(id);
+        },
+        cutByPlatformPlane(id, platformAxis, platformPosition, keepMode, cap) {
+          const [axis, position, keep] = platformCutPlaneToWorld(
+            platformAxis,
+            platformPosition,
+            keepMode,
+          );
+          return cut_model_by_plane(id, axis, position, keep, cap);
+        },
+        setCutPreview(platformAxis, platformPosition, visible) {
+          const [axis, position] = platformCutPlaneToWorld(
+            platformAxis,
+            platformPosition,
+            2,
+          );
+          set_cut_preview_plane_by_axis(axis, position, visible);
+        },
+        clearCutPreview() {
+          clear_cut_preview();
         },
         delete(id) {
           delete_model(id);
@@ -842,6 +940,14 @@
         } else {
           modelCommands.activateTool("scale");
         }
+      });
+
+      cutButton.addEventListener("click", () => {
+        if (selectedModelIds.length === 0) {
+          return;
+        }
+        cutPanelOpen = !cutPanelOpen;
+        syncCutPanelFromSelection(true);
       });
 
       colorButton.addEventListener("click", () => {
@@ -947,6 +1053,36 @@
 
       scaleApplyButton.addEventListener("click", () => {
         applyScalePanelValues();
+      });
+
+      cutAxisSelect.addEventListener("change", () => {
+        syncCutPanelFromSelection(true);
+        updateCutPreviewFromPanel();
+      });
+
+      cutPositionInput.addEventListener("input", () => {
+        cutPositionSlider.value = cutPositionInput.value;
+        rememberCutPanelPosition();
+        updateCutPreviewFromPanel();
+      });
+
+      cutPositionInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          applyCutPanelValues();
+        }
+      });
+
+      cutPositionSlider.addEventListener("input", () => {
+        cutPositionInput.value = formatFixed(
+          Number.parseFloat(cutPositionSlider.value),
+          2,
+        );
+        rememberCutPanelPosition();
+        updateCutPreviewFromPanel();
+      });
+
+      cutApplyButton.addEventListener("click", () => {
+        applyCutPanelValues();
       });
 
       scaleUniformInput.addEventListener("change", () => {
@@ -1074,6 +1210,33 @@
         return JSON.parse(boundsJson);
       };
 
+      const selectedPlatformBounds = () => {
+        const bounds = selectedBounds();
+        if (!bounds) {
+          return null;
+        }
+
+        const [minX = 0, minY = 0, minZ = 0] = bounds.min ?? [];
+        const [maxX = 0, maxY = 0, maxZ = 0] = bounds.max ?? [];
+        const corners = [];
+        for (const x of [minX, maxX]) {
+          for (const y of [minY, maxY]) {
+            for (const z of [minZ, maxZ]) {
+              corners.push(worldToPlatformPosition([x, y, z]));
+            }
+          }
+        }
+
+        return {
+          min: [0, 1, 2].map((axis) =>
+            Math.min(...corners.map((corner) => corner[axis])),
+          ),
+          max: [0, 1, 2].map((axis) =>
+            Math.max(...corners.map((corner) => corner[axis])),
+          ),
+        };
+      };
+
       const groupBoundsCenter = (bounds) => {
         const [minX = 0, minY = 0, minZ = 0] = bounds.min ?? [];
         const [maxX = 0, maxY = 0, maxZ = 0] = bounds.max ?? [];
@@ -1102,6 +1265,27 @@
       const platformToWorldPosition = ([x = 0, y = 0, z = 0]) => [x, z, -y];
 
       const platformToWorldDelta = ([x = 0, y = 0, z = 0]) => [x, z, -y];
+
+      const platformCutPlaneToWorld = (axis, position, keep) => {
+        if (axis === 0) {
+          return [0, position, keep];
+        }
+        if (axis === 1) {
+          const mappedKeep = keep === 0 ? 1 : keep === 1 ? 0 : keep;
+          return [2, -position, mappedKeep];
+        }
+        return [1, position, keep];
+      };
+
+      const worldCutPlaneToPlatform = (axis, position) => {
+        if (axis === 0) {
+          return [0, position];
+        }
+        if (axis === 2) {
+          return [1, -position];
+        }
+        return [2, position];
+      };
 
       const applyWorldPosition = (id, platformPosition) => {
         modelCommands.setPosition(id, platformPosition);
@@ -1330,6 +1514,94 @@
         writeScaleSizes(sizes);
       };
 
+      const clampCutPositionForAxis = (axis, position) => {
+        const bounds = selectedPlatformBounds();
+        if (!bounds) {
+          return Number.isFinite(position) ? position : 0;
+        }
+
+        const min = bounds.min[axis] ?? 0;
+        const max = bounds.max[axis] ?? 0;
+        const center = (min + max) * 0.5;
+        const value = Number.isFinite(position) ? position : center;
+        return Math.min(Math.max(value, min), max);
+      };
+
+      const syncCutPanelFromSelection = (force = false) => {
+        const visible = cutPanelOpen && selectedModelIds.length > 0;
+        cutPanel.hidden = !visible;
+        cutButton.classList.toggle("is-active", visible);
+        if (!visible) {
+          modelCommands.clearCutPreview();
+          return;
+        }
+
+        const bounds = selectedPlatformBounds();
+        if (!bounds) {
+          return;
+        }
+
+        const axis = Number.parseInt(cutAxisSelect.value, 10) || 0;
+        const min = bounds.min[axis] ?? 0;
+        const max = bounds.max[axis] ?? 0;
+        const center = (min + max) * 0.5;
+        cutPositionSlider.min = formatFixed(min, 2);
+        cutPositionSlider.max = formatFixed(max, 2);
+        cutCurrent.textContent = `范围：${formatFixed(min, 2)} 到 ${formatFixed(max, 2)} mm`;
+
+        let position = cutPositionByAxis[axis];
+        if (!Number.isFinite(position) || force) {
+          position = Number.isFinite(position) ? position : center;
+        }
+        position = clampCutPositionForAxis(axis, position);
+        cutPositionByAxis[axis] = position;
+
+        if (force || !cutPanel.contains(document.activeElement)) {
+          cutPositionInput.value = formatFixed(position, 2);
+          cutPositionSlider.value = formatFixed(position, 2);
+        }
+        updateCutPreviewFromPanel();
+      };
+
+      const rememberCutPanelPosition = () => {
+        const axis = Number.parseInt(cutAxisSelect.value, 10) || 0;
+        cutPositionByAxis[axis] = clampCutPositionForAxis(
+          axis,
+          parseNumberInput(cutPositionInput),
+        );
+      };
+
+      const updateCutPreviewFromPanel = () => {
+        if (!cutPanelOpen || selectedModelIds.length === 0) {
+          modelCommands.clearCutPreview();
+          return;
+        }
+
+        const axis = Number.parseInt(cutAxisSelect.value, 10) || 0;
+        const position = clampCutPositionForAxis(axis, parseNumberInput(cutPositionInput));
+        cutPositionByAxis[axis] = position;
+        cutPositionInput.value = formatFixed(position, 2);
+        cutPositionSlider.value = formatFixed(position, 2);
+        modelCommands.setCutPreview(axis, position, true);
+      };
+
+      const applyCutPanelValues = () => {
+        if (selectedModelIds.length === 0) {
+          return;
+        }
+
+        const axis = Number.parseInt(cutAxisSelect.value, 10) || 0;
+        const position = clampCutPositionForAxis(axis, parseNumberInput(cutPositionInput));
+        const keep = Number.parseInt(cutKeepSelect.value, 10) || 0;
+        const cap = cutCapInput.checked;
+        cutPositionByAxis[axis] = position;
+        cutPositionInput.value = formatFixed(position, 2);
+        cutPositionSlider.value = formatFixed(position, 2);
+        for (const id of [...selectedModelIds]) {
+          modelCommands.cutByPlatformPlane(id, axis, position, keep, cap);
+        }
+      };
+
       const updateModelInfoPanel = () => {
         if (selectedModelId === 0 || selectedModelIds.length !== 1) {
           lastModelInfoJson = "";
@@ -1367,6 +1639,7 @@
         syncMovePanelFromSelection();
         syncRotatePanelFromSelection();
         syncScalePanelFromSelection();
+        syncCutPanelFromSelection();
         requestAnimationFrame(scheduleModelInfoRefresh);
       };
 
@@ -1390,7 +1663,28 @@
             event.detail?.selectedModelIds ??
             (selectedModelId === 0 ? [] : [selectedModelId]);
           syncToolAvailability();
+          if (selectedModelIds.length === 0) {
+            cutPanelOpen = false;
+          }
+          syncCutPanelFromSelection(true);
           updateModelInfoPanel();
+        },
+      );
+      window.addEventListener(
+        "bevy-transform-tools:cut-preview-change",
+        (event) => {
+          if (!cutPanelOpen) {
+            return;
+          }
+
+          const [axis, position] = worldCutPlaneToPlatform(
+            event.detail?.axis ?? 0,
+            event.detail?.position ?? 0,
+          );
+          cutAxisSelect.value = String(axis);
+          cutPositionByAxis[axis] = position;
+          cutPositionInput.value = formatFixed(position, 2);
+          cutPositionSlider.value = formatFixed(position, 2);
         },
       );
       window.addEventListener("bevy-transform-tools:tool-change", (event) => {

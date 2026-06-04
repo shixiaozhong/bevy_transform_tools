@@ -7,6 +7,7 @@ use bevy::{
 
 mod camera;
 mod coordinates;
+mod cut;
 mod drawing;
 mod gizmo_draw;
 mod gizmo_interaction;
@@ -19,6 +20,10 @@ mod selection;
 mod tool;
 
 use camera::{OrbitDrag, orbit_camera};
+use cut::{
+    CutPreview, begin_cut_preview_drag, sync_cut_preview_from_api, update_cut_preview_drag,
+    update_cut_preview_plane_visual,
+};
 use drawing::{draw_grid_and_selection, update_rotation_angle_label};
 use gizmo_interaction::{
     GizmoDrag, RotateGizmoHover, begin_gizmo_drag, update_gizmo_drag, update_rotate_gizmo_hover,
@@ -56,6 +61,7 @@ pub fn run_app() {
         .insert_resource(OrbitDrag::default())
         .insert_resource(ActiveTool::default())
         .insert_resource(OrientationInteraction::default())
+        .insert_resource(CutPreview::default())
         .insert_gizmo_config::<OrientationGizmos>(
             OrientationGizmos,
             GizmoConfig {
@@ -88,9 +94,13 @@ pub fn run_app() {
             Update,
             (
                 apply_model_commands,
+                sync_cut_preview_from_api,
                 begin_gizmo_drag,
+                begin_cut_preview_drag,
                 update_rotate_gizmo_hover,
                 update_gizmo_drag,
+                update_cut_preview_drag,
+                update_cut_preview_plane_visual,
                 update_model_drag,
                 orbit_camera,
                 sync_camera_fill_light,

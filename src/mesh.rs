@@ -1,5 +1,8 @@
 use bevy::{asset::RenderAssetUsages, prelude::*, render::render_resource::PrimitiveTopology};
 
+pub(crate) mod clip;
+pub(crate) mod triangulation;
+
 #[derive(Clone, Debug, Default)]
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,

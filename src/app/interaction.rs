@@ -7,6 +7,7 @@ use crate::state::{self, ToolModeSpec};
 
 use super::{
     camera::{OrbitCamera, OrbitDrag},
+    cut::CutPreview,
     gizmo_interaction::GizmoDrag,
     model::{ImportedModel, ModelDrag, ModelDragState, SelectedModel, model_visual_center},
     orientation::{OrientationInteraction, OrientationViewTarget},
@@ -72,6 +73,7 @@ pub(super) fn start_model_drag(
     camera: Single<(&Camera, &GlobalTransform), With<OrbitCamera>>,
     models: Query<(&ImportedModel, &Transform)>,
     active_tool: Res<ActiveTool>,
+    cut_preview: Res<CutPreview>,
     mut model_drag: ResMut<ModelDrag>,
     mut selected: ResMut<SelectedModel>,
 ) {
@@ -79,6 +81,7 @@ pub(super) fn start_model_drag(
         || active_tool.is_move()
         || active_tool.is_rotate()
         || active_tool.is_scale()
+        || cut_preview.active_plane().is_some()
     {
         return;
     }
@@ -112,6 +115,7 @@ pub(super) fn update_model_drag(
     window: Single<&Window>,
     camera: Single<(&Camera, &GlobalTransform), With<OrbitCamera>>,
     gizmo_drag: Res<GizmoDrag>,
+    cut_preview: Res<CutPreview>,
     mut model_drag: ResMut<ModelDrag>,
     mut models: Query<(&ImportedModel, &mut Transform)>,
 ) {
@@ -120,7 +124,7 @@ pub(super) fn update_model_drag(
         return;
     }
 
-    if gizmo_drag.is_active() {
+    if gizmo_drag.is_active() || cut_preview.active_plane().is_some() {
         return;
     }
 

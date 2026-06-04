@@ -6,6 +6,7 @@ use super::{
     GRID_HALF_EXTENT,
     camera::OrbitCamera,
     coordinates::print_axis_to_world,
+    cut::{CutPreview, draw_cut_preview, spawn_cut_preview_plane_visual},
     gizmo_draw::{draw_move_gizmo, draw_rotate_gizmo, draw_scale_gizmo},
     gizmo_interaction::{GizmoDrag, RotateGizmoHover},
     gizmo_layout::{
@@ -37,6 +38,7 @@ pub(super) fn spawn_drawing_overlays(
 ) {
     spawn_rotation_angle_label(commands);
     spawn_scale_handle_visuals(commands, meshes, materials);
+    spawn_cut_preview_plane_visual(commands, meshes, materials);
 }
 
 fn spawn_scale_handle_visuals(
@@ -87,6 +89,7 @@ fn spawn_rotation_angle_label(commands: &mut Commands) {
 pub(super) fn draw_grid_and_selection(
     selected: Res<SelectedModel>,
     active_tool: Res<ActiveTool>,
+    cut_preview: Res<CutPreview>,
     gizmo_drag: Res<GizmoDrag>,
     rotate_hover: Res<RotateGizmoHover>,
     models: Query<(&ImportedModel, &Transform)>,
@@ -103,6 +106,7 @@ pub(super) fn draw_grid_and_selection(
     mut gizmos: Gizmos,
 ) {
     draw_ground_grid(&mut gizmos);
+    draw_cut_preview(&mut gizmos, &cut_preview, &selected, &models);
     update_scale_handle_visuals(
         &selected,
         &active_tool,
@@ -114,6 +118,7 @@ pub(super) fn draw_grid_and_selection(
         &mut gizmos,
         &selected,
         &active_tool,
+        &cut_preview,
         &gizmo_drag,
         &rotate_hover,
         &models,
@@ -257,6 +262,7 @@ fn draw_selected_model_tools(
     gizmos: &mut Gizmos,
     selected: &SelectedModel,
     active_tool: &ActiveTool,
+    cut_preview: &CutPreview,
     gizmo_drag: &GizmoDrag,
     rotate_hover: &RotateGizmoHover,
     models: &Query<(&ImportedModel, &Transform)>,
@@ -269,8 +275,10 @@ fn draw_selected_model_tools(
     };
     let selection_center = (selection_min + selection_max) * 0.5;
     let selection_size = selection_max - selection_min;
-    let show_selection_bounds =
-        !active_tool.is_move() && !active_tool.is_rotate() && !active_tool.is_scale();
+    let show_selection_bounds = !active_tool.is_move()
+        && !active_tool.is_rotate()
+        && !active_tool.is_scale()
+        && cut_preview.active_plane().is_none();
 
     if show_selection_bounds && selected.len() > 1 {
         draw_world_aabb(gizmos, selection_min, selection_max);

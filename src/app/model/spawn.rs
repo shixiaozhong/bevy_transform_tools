@@ -28,11 +28,9 @@ pub(in crate::app::model) fn spawn_imported_model(
         cull_mode: None,
         ..default()
     });
-    let bounds = mesh.bounds();
-    let triangle_count = mesh.positions.len() / 3;
-    let volume = mesh.volume();
+    let metadata = imported_model_metadata(id, name.clone(), mesh.clone());
     let mut model_transform = transform.to_transform();
-    if let Some(bounds) = bounds {
+    if let Some(bounds) = metadata.bounds {
         center_model_on_platform(&mut model_transform, bounds.center);
     }
 
@@ -42,13 +40,45 @@ pub(in crate::app::model) fn spawn_imported_model(
             MeshMaterial3d(material),
             model_transform,
             Name::new(name.clone()),
-            ImportedModel {
-                id,
-                name,
-                bounds,
-                triangle_count,
-                volume,
-            },
+            metadata,
+        ))
+        .observe(select_model_on_click)
+        .observe(start_model_drag);
+}
+
+pub(in crate::app::model) fn imported_model_metadata(
+    id: u32,
+    name: String,
+    mesh: MeshData,
+) -> ImportedModel {
+    let bounds = mesh.bounds();
+    let triangle_count = mesh.positions.len() / 3;
+    let volume = mesh.volume();
+    ImportedModel {
+        id,
+        name,
+        mesh,
+        bounds,
+        triangle_count,
+        volume,
+    }
+}
+
+pub(in crate::app::model) fn spawn_cut_model(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    id: u32,
+    name: String,
+    mesh: MeshData,
+    material: MeshMaterial3d<StandardMaterial>,
+) {
+    commands
+        .spawn((
+            Mesh3d(meshes.add(mesh.clone().into_mesh())),
+            material,
+            Transform::IDENTITY,
+            Name::new(name.clone()),
+            imported_model_metadata(id, name, mesh),
         ))
         .observe(select_model_on_click)
         .observe(start_model_drag);

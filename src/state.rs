@@ -2,12 +2,16 @@ use std::{cell::RefCell, collections::HashMap};
 
 use bevy::prelude::*;
 
-use crate::mesh::MeshData;
+use crate::mesh::{
+    MeshData,
+    clip::{CutAxis, CutKeep, CutPlane},
+};
 
 thread_local! {
     static PENDING_COMMANDS: RefCell<Vec<ModelCommand>> = const { RefCell::new(Vec::new()) };
     static API_STATE: RefCell<ApiState> = RefCell::new(ApiState::default());
     static ROTATION_FOCUS_AXIS: RefCell<Option<usize>> = const { RefCell::new(None) };
+    static CUT_PREVIEW_UPDATE: RefCell<Option<CutPreviewUpdate>> = const { RefCell::new(None) };
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +52,13 @@ pub(crate) enum ModelCommand {
     },
     CenterOnOrigin(u32),
     DropToBuildPlate(u32),
+    Cut {
+        id: u32,
+        plane: CutPlane,
+        keep: CutKeep,
+        cap: bool,
+        new_id: Option<u32>,
+    },
     SetActiveTool(ToolModeSpec),
     Remove(u32),
     RemoveAll,
@@ -68,6 +79,12 @@ pub(crate) struct TransformSpec {
     pub(crate) translation: [f32; 3],
     pub(crate) rotation_radians: [f32; 3],
     pub(crate) scale: [f32; 3],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CutPreviewUpdate {
+    pub(crate) visible: bool,
+    pub(crate) plane: Option<CutPlane>,
 }
 
 impl Default for TransformSpec {
@@ -208,6 +225,18 @@ pub(crate) fn rotation_focus_axis() -> Option<usize> {
     ROTATION_FOCUS_AXIS.with(|focus| *focus.borrow())
 }
 
+pub(crate) fn set_cut_preview(update: CutPreviewUpdate) {
+    CUT_PREVIEW_UPDATE.with(|preview| *preview.borrow_mut() = Some(update));
+}
+
+pub(crate) fn take_cut_preview_update() -> Option<CutPreviewUpdate> {
+    CUT_PREVIEW_UPDATE.with(|preview| preview.borrow_mut().take())
+}
+
+pub(crate) fn remember_cut_preview_position(axis: CutAxis, position: f32) {
+    dispatch_cut_preview_changed(axis_index(axis), position);
+}
+
 pub(crate) fn allocate_model_id() -> u32 {
     API_STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -337,6 +366,14 @@ fn notify_tool_changed(mode: ToolModeSpec) {
     dispatch_tool_changed(tool_mode_json(mode));
 }
 
+fn axis_index(axis: CutAxis) -> i32 {
+    match axis {
+        CutAxis::X => 0,
+        CutAxis::Y => 1,
+        CutAxis::Z => 2,
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn dispatch_selection_changed(selected_id: u32, selected_ids_json: &str) {
     browser_events::dispatch_selection_changed(selected_id, selected_ids_json);
@@ -352,6 +389,14 @@ fn dispatch_tool_changed(active_tool_json: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn dispatch_tool_changed(_active_tool_json: &str) {}
+
+#[cfg(target_arch = "wasm32")]
+fn dispatch_cut_preview_changed(axis: i32, position: f32) {
+    browser_events::dispatch_cut_preview_changed(axis, position);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dispatch_cut_preview_changed(_axis: i32, _position: f32) {}
 
 #[cfg(target_arch = "wasm32")]
 mod browser_events {
@@ -370,6 +415,12 @@ mod browser_events {
             window.dispatchEvent(new CustomEvent('bevy-transform-tools:tool-change', {
                 detail: { activeTool }
             }));
+        }
+
+        export function dispatch_cut_preview_changed(axis, position) {
+            window.dispatchEvent(new CustomEvent('bevy-transform-tools:cut-preview-change', {
+                detail: { axis, position }
+            }));
         }"
     )]
     extern "C" {
@@ -378,6 +429,7 @@ mod browser_events {
             selected_model_ids_json: &str,
         );
         pub(super) fn dispatch_tool_changed(active_tool_json: &str);
+        pub(super) fn dispatch_cut_preview_changed(axis: i32, position: f32);
     }
 }
 

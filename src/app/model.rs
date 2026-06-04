@@ -5,7 +5,7 @@ mod transform;
 
 use bevy::prelude::*;
 
-use crate::mesh::MeshBounds;
+use crate::mesh::{MeshBounds, MeshData};
 
 pub(super) use commands::apply_model_commands;
 pub(super) use info::update_api_state_from_scene;
@@ -15,6 +15,7 @@ pub(super) use transform::{model_visual_center, model_world_bounds, selected_wor
 pub(super) struct ImportedModel {
     pub(super) id: u32,
     pub(super) name: String,
+    pub(super) mesh: MeshData,
     pub(super) bounds: Option<MeshBounds>,
     pub(super) triangle_count: usize,
     pub(super) volume: f64,
