@@ -378,6 +378,12 @@ fn transform_mesh(mesh: &MeshData, transform: &Transform) -> MeshData {
 
 fn set_active_tool(active_tool: &mut ActiveTool, mode: state::ToolModeSpec) {
     active_tool.set_mode(mode);
+    if mode != state::ToolModeSpec::Cut {
+        state::set_cut_preview(state::CutPreviewUpdate {
+            visible: false,
+            plane: None,
+        });
+    }
     state::remember_active_tool(mode);
 }
 

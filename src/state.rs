@@ -72,6 +72,7 @@ pub(crate) enum ToolModeSpec {
     Move,
     Rotate,
     Scale,
+    Cut,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -489,6 +490,7 @@ fn tool_mode_json(mode: ToolModeSpec) -> &'static str {
         ToolModeSpec::Move => "\"move\"",
         ToolModeSpec::Rotate => "\"rotate\"",
         ToolModeSpec::Scale => "\"scale\"",
+        ToolModeSpec::Cut => "\"cut\"",
     }
 }
 

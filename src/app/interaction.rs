@@ -65,6 +65,10 @@ pub(super) fn clear_selection_on_non_model_click(
     model_drag.active = None;
     active_tool.set_mode(ToolModeSpec::None);
     state::remember_selection(None);
+    state::set_cut_preview(state::CutPreviewUpdate {
+        visible: false,
+        plane: None,
+    });
     state::remember_active_tool(ToolModeSpec::None);
 }
 
@@ -81,6 +85,7 @@ pub(super) fn start_model_drag(
         || active_tool.is_move()
         || active_tool.is_rotate()
         || active_tool.is_scale()
+        || active_tool.is_cut()
         || cut_preview.active_plane().is_some()
     {
         return;

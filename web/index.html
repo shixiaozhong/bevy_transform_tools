@@ -204,6 +204,13 @@
         display: none;
       }
 
+      body:not([data-tool="move"]) #move-panel,
+      body:not([data-tool="rotate"]) #rotate-panel,
+      body:not([data-tool="scale"]) #scale-panel,
+      body:not([data-tool="cut"]) #cut-panel {
+        display: none;
+      }
+
       .move-panel-grid {
         display: grid;
         grid-template-columns: 120px repeat(3, minmax(96px, 1fr)) 36px 72px;
@@ -709,6 +716,7 @@
 
     <script type="module">
       import init, {
+        activate_cut_tool_mode,
         activate_move_tool_mode,
         activate_rotate_tool_mode,
         activate_scale_tool_mode,
@@ -805,7 +813,6 @@
       let lastModelInfoJson = "";
       let scaleBaseSize = [0, 0, 0];
       let isSyncingScalePanel = false;
-      let cutPanelOpen = false;
       let cutPositionByAxis = [null, null, null];
 
       const modelCommands = {
@@ -824,6 +831,8 @@
             activate_rotate_tool_mode();
           } else if (tool === "scale") {
             activate_scale_tool_mode();
+          } else if (tool === "cut") {
+            activate_cut_tool_mode();
           }
         },
         clearTool() {
@@ -906,48 +915,42 @@
         fileInput.value = "";
       });
 
+      const toggleTool = (tool) => {
+        const nextTool = activeTool === tool ? null : tool;
+        setActiveToolButton(nextTool);
+        if (nextTool) {
+          modelCommands.activateTool(nextTool);
+        } else {
+          modelCommands.clearTool();
+        }
+      };
+
       moveButton.addEventListener("click", () => {
         if (selectedModelId === 0) {
           return;
         }
-
-        if (activeTool === "move") {
-          modelCommands.clearTool();
-        } else {
-          modelCommands.activateTool("move");
-        }
+        toggleTool("move");
       });
 
       rotateButton.addEventListener("click", () => {
         if (selectedModelId === 0) {
           return;
         }
-
-        if (activeTool === "rotate") {
-          modelCommands.clearTool();
-        } else {
-          modelCommands.activateTool("rotate");
-        }
+        toggleTool("rotate");
       });
 
       scaleButton.addEventListener("click", () => {
         if (selectedModelId === 0) {
           return;
         }
-
-        if (activeTool === "scale") {
-          modelCommands.clearTool();
-        } else {
-          modelCommands.activateTool("scale");
-        }
+        toggleTool("scale");
       });
 
       cutButton.addEventListener("click", () => {
         if (selectedModelIds.length === 0) {
           return;
         }
-        cutPanelOpen = !cutPanelOpen;
-        syncCutPanelFromSelection(true);
+        toggleTool("cut");
       });
 
       colorButton.addEventListener("click", () => {
@@ -1528,7 +1531,7 @@
       };
 
       const syncCutPanelFromSelection = (force = false) => {
-        const visible = cutPanelOpen && selectedModelIds.length > 0;
+        const visible = activeTool === "cut" && selectedModelIds.length > 0;
         cutPanel.hidden = !visible;
         cutButton.classList.toggle("is-active", visible);
         if (!visible) {
@@ -1572,7 +1575,7 @@
       };
 
       const updateCutPreviewFromPanel = () => {
-        if (!cutPanelOpen || selectedModelIds.length === 0) {
+        if (activeTool !== "cut" || selectedModelIds.length === 0) {
           modelCommands.clearCutPreview();
           return;
         }
@@ -1645,12 +1648,23 @@
 
       const setActiveToolButton = (tool) => {
         activeTool = tool;
+        document.body.dataset.tool = tool ?? "";
+        movePanel.hidden = tool !== "move";
+        rotatePanel.hidden = tool !== "rotate";
+        scalePanel.hidden = tool !== "scale";
+        cutPanel.hidden = tool !== "cut";
+        moveButton.classList.remove("is-active");
+        rotateButton.classList.remove("is-active");
+        scaleButton.classList.remove("is-active");
+        cutButton.classList.remove("is-active");
         moveButton.classList.toggle("is-active", tool === "move");
-        scaleButton.classList.toggle("is-active", tool === "scale");
         rotateButton.classList.toggle("is-active", tool === "rotate");
+        scaleButton.classList.toggle("is-active", tool === "scale");
+        cutButton.classList.toggle("is-active", tool === "cut");
         syncMovePanelFromSelection(true);
         syncRotatePanelFromSelection(true);
         syncScalePanelFromSelection(true);
+        syncCutPanelFromSelection(true);
       };
       let selectedModelId = 0;
       let selectedModelIds = [];
@@ -1664,7 +1678,7 @@
             (selectedModelId === 0 ? [] : [selectedModelId]);
           syncToolAvailability();
           if (selectedModelIds.length === 0) {
-            cutPanelOpen = false;
+            modelCommands.clearTool();
           }
           syncCutPanelFromSelection(true);
           updateModelInfoPanel();
@@ -1673,7 +1687,7 @@
       window.addEventListener(
         "bevy-transform-tools:cut-preview-change",
         (event) => {
-          if (!cutPanelOpen) {
+          if (activeTool !== "cut") {
             return;
           }
 

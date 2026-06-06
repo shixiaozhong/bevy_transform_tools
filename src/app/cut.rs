@@ -15,6 +15,7 @@ use crate::{
 use super::{
     camera::OrbitCamera,
     model::{ImportedModel, SelectedModel, selected_world_bounds},
+    tool::ActiveTool,
 };
 
 #[derive(Resource, Default)]
@@ -124,10 +125,11 @@ pub(super) fn begin_cut_preview_drag(
     window: Single<&Window>,
     camera: Single<(&Camera, &GlobalTransform), With<OrbitCamera>>,
     selected: Res<SelectedModel>,
+    active_tool: Res<ActiveTool>,
     models: Query<(&ImportedModel, &Transform)>,
     mut preview: ResMut<CutPreview>,
 ) {
-    if !buttons.just_pressed(MouseButton::Left) || preview.drag.is_some() {
+    if !active_tool.is_cut() || !buttons.just_pressed(MouseButton::Left) || preview.drag.is_some() {
         return;
     }
     let Some(plane) = preview.active_plane() else {
