@@ -15,6 +15,10 @@ pub(in crate::app) fn model_world_bounds(
     model: &ImportedModel,
     transform: &Transform,
 ) -> (Vec3, Vec3) {
+    if let Some(bounds) = transformed_mesh_bounds(model, transform) {
+        return bounds;
+    }
+
     let Some(bounds) = model.bounds else {
         let half = Vec3::splat(0.5);
         return (transform.translation - half, transform.translation + half);
@@ -34,6 +38,21 @@ pub(in crate::app) fn model_world_bounds(
     }
 
     (min, max)
+}
+
+fn transformed_mesh_bounds(model: &ImportedModel, transform: &Transform) -> Option<(Vec3, Vec3)> {
+    let first = Vec3::from_array(*model.mesh.positions.first()?);
+    let first = transform.transform_point(first);
+    let mut min = first;
+    let mut max = first;
+
+    for position in &model.mesh.positions[1..] {
+        let point = transform.transform_point(Vec3::from_array(*position));
+        min = min.min(point);
+        max = max.max(point);
+    }
+
+    Some((min, max))
 }
 
 pub(in crate::app) fn selected_world_bounds(
@@ -232,6 +251,31 @@ mod tests {
         let center = model_visual_center(&model, &transform);
         assert_close(center.x, 0.0);
         assert_close(center.z, 0.0);
+    }
+
+    #[test]
+    fn model_world_bounds_uses_transformed_mesh_vertices() {
+        let mesh = crate::mesh::MeshData {
+            positions: vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            ..default()
+        };
+        let model = test_model_with_mesh(
+            1,
+            MeshBounds {
+                center: Vec3::ZERO,
+                size: Vec3::splat(10.0),
+            },
+            mesh,
+        );
+        let transform =
+            Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
+
+        let (min, max) = model_world_bounds(&model, &transform);
+
+        assert_close(min.x, -1.0);
+        assert_close(min.y, 0.0);
+        assert_close(max.x, 0.0);
+        assert_close(max.y, 2.0);
     }
 
     #[test]

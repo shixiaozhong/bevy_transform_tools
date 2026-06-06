@@ -1,7 +1,5 @@
 use bevy::prelude::*;
 
-use crate::mesh::MeshBounds;
-
 use super::{
     GRID_HALF_EXTENT,
     camera::OrbitCamera,
@@ -14,7 +12,10 @@ use super::{
         rotation_handle_radial, scale_handle_layout, world_axis_to_rotation_print_axis,
     },
     interaction::{BottomFaceHover, draw_bottom_face_hover, spawn_bottom_face_hover_visual},
-    model::{ImportedModel, SelectedModel, model_visual_center, selected_world_bounds},
+    model::{
+        ImportedModel, SelectedModel, model_visual_center, model_world_bounds,
+        selected_world_bounds,
+    },
     tool::ActiveTool,
 };
 
@@ -290,12 +291,9 @@ fn draw_selected_model_tools(
     }
 
     for (model, transform) in models {
-        if show_selection_bounds
-            && selected.len() == 1
-            && selected.contains(model.id)
-            && let Some(bounds) = model.bounds
-        {
-            draw_model_aabb(gizmos, bounds, transform);
+        if show_selection_bounds && selected.len() == 1 && selected.contains(model.id) {
+            let (min, max) = model_world_bounds(model, transform);
+            draw_world_aabb(gizmos, min, max);
         }
 
         if model.id != primary_id {
@@ -376,11 +374,6 @@ fn update_scale_handle_visuals(
     }
 }
 
-fn draw_model_aabb(gizmos: &mut Gizmos, bounds: MeshBounds, transform: &Transform) {
-    let corners = world_aabb_corners(bounds, transform);
-    draw_aabb_corners(gizmos, corners);
-}
-
 fn draw_world_aabb(gizmos: &mut Gizmos, min: Vec3, max: Vec3) {
     draw_aabb_corners(
         gizmos,
@@ -403,39 +396,6 @@ fn draw_aabb_corners(gizmos: &mut Gizmos, corners: [Vec3; 8]) {
     for (start, end) in AABB_EDGES {
         gizmos.line(corners[start], corners[end], color);
     }
-}
-
-fn world_aabb_corners(bounds: MeshBounds, transform: &Transform) -> [Vec3; 8] {
-    let half = bounds.size * 0.5;
-    let local_corners = [
-        bounds.center + Vec3::new(-half.x, -half.y, -half.z),
-        bounds.center + Vec3::new(half.x, -half.y, -half.z),
-        bounds.center + Vec3::new(half.x, half.y, -half.z),
-        bounds.center + Vec3::new(-half.x, half.y, -half.z),
-        bounds.center + Vec3::new(-half.x, -half.y, half.z),
-        bounds.center + Vec3::new(half.x, -half.y, half.z),
-        bounds.center + Vec3::new(half.x, half.y, half.z),
-        bounds.center + Vec3::new(-half.x, half.y, half.z),
-    ];
-
-    let mut min = transform.transform_point(local_corners[0]);
-    let mut max = min;
-    for corner in local_corners.iter().skip(1) {
-        let world = transform.transform_point(*corner);
-        min = min.min(world);
-        max = max.max(world);
-    }
-
-    [
-        Vec3::new(min.x, min.y, min.z),
-        Vec3::new(max.x, min.y, min.z),
-        Vec3::new(max.x, max.y, min.z),
-        Vec3::new(min.x, max.y, min.z),
-        Vec3::new(min.x, min.y, max.z),
-        Vec3::new(max.x, min.y, max.z),
-        Vec3::new(max.x, max.y, max.z),
-        Vec3::new(min.x, max.y, max.z),
-    ]
 }
 
 fn draw_ground_grid(gizmos: &mut Gizmos) {
