@@ -9,7 +9,9 @@ use crate::mesh::{MeshBounds, MeshData};
 
 pub(super) use commands::apply_model_commands;
 pub(super) use info::update_api_state_from_scene;
-pub(super) use transform::{model_visual_center, model_world_bounds, selected_world_bounds};
+pub(super) use transform::{
+    model_visual_center, model_world_bounds, place_model_face_on_build_plate, selected_world_bounds,
+};
 
 #[derive(Component)]
 pub(super) struct ImportedModel {

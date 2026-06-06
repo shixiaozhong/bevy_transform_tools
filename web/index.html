@@ -563,6 +563,7 @@
           <span class="tool-label">贴底面</span>
         </button>
         <button
+          id="bottom-face-tool"
           class="tool-button"
           type="button"
           title="选择底面"
@@ -716,6 +717,7 @@
 
     <script type="module">
       import init, {
+        activate_bottom_face_tool_mode,
         activate_cut_tool_mode,
         activate_move_tool_mode,
         activate_rotate_tool_mode,
@@ -765,6 +767,7 @@
       const scaleButton = document.querySelector("#scale-tool");
       const rotateButton = document.querySelector("#rotate-tool");
       const cutButton = document.querySelector("#cut-model");
+      const bottomFaceButton = document.querySelector("#bottom-face-tool");
       const colorButton = document.querySelector("#color-model");
       const colorInput = document.querySelector("#model-color");
       const centerButton = document.querySelector("#center-model");
@@ -833,6 +836,8 @@
             activate_scale_tool_mode();
           } else if (tool === "cut") {
             activate_cut_tool_mode();
+          } else if (tool === "bottom-face") {
+            activate_bottom_face_tool_mode();
           }
         },
         clearTool() {
@@ -951,6 +956,13 @@
           return;
         }
         toggleTool("cut");
+      });
+
+      bottomFaceButton.addEventListener("click", () => {
+        if (selectedModelIds.length === 0) {
+          return;
+        }
+        toggleTool("bottom-face");
       });
 
       colorButton.addEventListener("click", () => {
@@ -1657,10 +1669,12 @@
         rotateButton.classList.remove("is-active");
         scaleButton.classList.remove("is-active");
         cutButton.classList.remove("is-active");
+        bottomFaceButton.classList.remove("is-active");
         moveButton.classList.toggle("is-active", tool === "move");
         rotateButton.classList.toggle("is-active", tool === "rotate");
         scaleButton.classList.toggle("is-active", tool === "scale");
         cutButton.classList.toggle("is-active", tool === "cut");
+        bottomFaceButton.classList.toggle("is-active", tool === "bottom-face");
         syncMovePanelFromSelection(true);
         syncRotatePanelFromSelection(true);
         syncScalePanelFromSelection(true);

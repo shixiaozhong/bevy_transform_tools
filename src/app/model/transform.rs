@@ -87,6 +87,22 @@ pub(in crate::app::model) fn drop_model_to_build_plate(
     transform.translation.y -= min_y;
 }
 
+pub(in crate::app) fn place_model_face_on_build_plate(
+    model: &ImportedModel,
+    transform: &mut Transform,
+    face_normal_world: Vec3,
+) {
+    let Some(face_normal_world) = face_normal_world.try_normalize() else {
+        return;
+    };
+
+    let center = model_visual_center(model, transform);
+    let rotation_delta = Quat::from_rotation_arc(face_normal_world, Vec3::NEG_Y);
+    transform.rotation = (rotation_delta * transform.rotation).normalize();
+    recenter_model_visual_center(model, transform, center);
+    drop_model_mesh_to_build_plate(model, transform);
+}
+
 pub(in crate::app::model) fn set_model_rotation(
     model: &ImportedModel,
     transform: &mut Transform,
@@ -134,15 +150,41 @@ fn transformed_bounds_min_y(bounds: MeshBounds, transform: &Transform) -> f32 {
         .fold(f32::INFINITY, f32::min)
 }
 
+fn drop_model_mesh_to_build_plate(model: &ImportedModel, transform: &mut Transform) {
+    let min_y = transformed_mesh_min_y(model, transform);
+    if min_y.is_finite() {
+        transform.translation.y -= min_y;
+    } else {
+        drop_model_to_build_plate(model, transform);
+    }
+}
+
+fn transformed_mesh_min_y(model: &ImportedModel, transform: &Transform) -> f32 {
+    model
+        .mesh
+        .positions
+        .iter()
+        .map(|position| transform.transform_point(Vec3::from_array(*position)).y)
+        .fold(f32::INFINITY, f32::min)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn test_model(id: u32, bounds: MeshBounds) -> ImportedModel {
+        test_model_with_mesh(id, bounds, Default::default())
+    }
+
+    fn test_model_with_mesh(
+        id: u32,
+        bounds: MeshBounds,
+        mesh: crate::mesh::MeshData,
+    ) -> ImportedModel {
         ImportedModel {
             id,
             name: format!("model-{id}"),
-            mesh: Default::default(),
+            mesh,
             bounds: Some(bounds),
             triangle_count: 12,
             volume: 1.0,
@@ -190,5 +232,27 @@ mod tests {
         let center = model_visual_center(&model, &transform);
         assert_close(center.x, 0.0);
         assert_close(center.z, 0.0);
+    }
+
+    #[test]
+    fn place_model_face_on_build_plate_aligns_face_normal_down() {
+        let mesh = crate::mesh::MeshData {
+            positions: vec![[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            ..default()
+        };
+        let bounds = mesh.bounds().unwrap();
+        let model = test_model_with_mesh(1, bounds, mesh);
+        let mut transform = Transform::from_xyz(3.0, 5.0, -2.0);
+
+        place_model_face_on_build_plate(&model, &mut transform, Vec3::Z);
+
+        let world_a = transform.transform_point(Vec3::from_array(model.mesh.positions[0]));
+        let world_b = transform.transform_point(Vec3::from_array(model.mesh.positions[1]));
+        let world_c = transform.transform_point(Vec3::from_array(model.mesh.positions[2]));
+        let normal = (world_b - world_a).cross(world_c - world_a).normalize();
+        assert_close(normal.dot(Vec3::NEG_Y), 1.0);
+        assert_close(transformed_mesh_min_y(&model, &transform), 0.0);
+        assert_close(model_visual_center(&model, &transform).x, 3.0);
+        assert_close(model_visual_center(&model, &transform).z, -2.0);
     }
 }

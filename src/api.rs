@@ -76,6 +76,10 @@ pub fn activate_cut_tool() {
     push_command(ModelCommand::SetActiveTool(ToolModeSpec::Cut));
 }
 
+pub fn activate_bottom_face_tool() {
+    push_command(ModelCommand::SetActiveTool(ToolModeSpec::BottomFace));
+}
+
 pub fn clear_active_tool() {
     push_command(ModelCommand::SetActiveTool(ToolModeSpec::None));
 }
@@ -297,6 +301,11 @@ mod wasm {
     #[wasm_bindgen]
     pub fn activate_cut_tool_mode() {
         activate_cut_tool();
+    }
+
+    #[wasm_bindgen]
+    pub fn activate_bottom_face_tool_mode() {
+        activate_bottom_face_tool();
     }
 
     #[wasm_bindgen]

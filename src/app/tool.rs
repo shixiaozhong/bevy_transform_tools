@@ -10,6 +10,7 @@ pub(super) enum ToolMode {
     Rotate,
     Scale,
     Cut,
+    BottomFace,
 }
 
 #[derive(Resource, Default)]
@@ -25,6 +26,7 @@ impl ActiveTool {
             ToolModeSpec::Rotate => ToolMode::Rotate,
             ToolModeSpec::Scale => ToolMode::Scale,
             ToolModeSpec::Cut => ToolMode::Cut,
+            ToolModeSpec::BottomFace => ToolMode::BottomFace,
         };
     }
 
@@ -42,5 +44,9 @@ impl ActiveTool {
 
     pub(super) fn is_cut(&self) -> bool {
         self.mode == ToolMode::Cut
+    }
+
+    pub(super) fn is_bottom_face(&self) -> bool {
+        self.mode == ToolMode::BottomFace
     }
 }

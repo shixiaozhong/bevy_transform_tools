@@ -28,7 +28,10 @@ use drawing::{draw_grid_and_selection, update_rotation_angle_label};
 use gizmo_interaction::{
     GizmoDrag, RotateGizmoHover, begin_gizmo_drag, update_gizmo_drag, update_rotate_gizmo_hover,
 };
-use interaction::{clear_selection_on_non_model_click, update_model_drag};
+use interaction::{
+    BottomFaceHover, clear_selection_on_non_model_click, place_bottom_face_on_click,
+    update_bottom_face_hover, update_model_drag,
+};
 use model::{ModelDrag, SelectedModel, apply_model_commands, update_api_state_from_scene};
 use orientation::{
     OrientationGizmos, OrientationInteraction, draw_orientation_overlay,
@@ -62,6 +65,7 @@ pub fn run_app() {
         .insert_resource(ActiveTool::default())
         .insert_resource(OrientationInteraction::default())
         .insert_resource(CutPreview::default())
+        .insert_resource(BottomFaceHover::default())
         .insert_gizmo_config::<OrientationGizmos>(
             OrientationGizmos,
             GizmoConfig {
@@ -88,6 +92,7 @@ pub fn run_app() {
         }))
         .add_plugins(MeshPickingPlugin)
         .add_observer(clear_selection_on_non_model_click)
+        .add_observer(place_bottom_face_on_click)
         .add_observer(orient_camera_from_cube_click)
         .add_systems(Startup, setup_scene)
         .add_systems(
@@ -101,6 +106,7 @@ pub fn run_app() {
                 update_gizmo_drag,
                 update_cut_preview_drag,
                 update_cut_preview_plane_visual,
+                update_bottom_face_hover,
                 update_model_drag,
                 orbit_camera,
                 sync_camera_fill_light,

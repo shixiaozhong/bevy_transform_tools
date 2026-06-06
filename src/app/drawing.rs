@@ -13,6 +13,7 @@ use super::{
         move_gizmo_length, normalized_degrees, rotate_gizmo_radius, rotation_axis_label,
         rotation_handle_radial, scale_handle_layout, world_axis_to_rotation_print_axis,
     },
+    interaction::{BottomFaceHover, draw_bottom_face_hover, spawn_bottom_face_hover_visual},
     model::{ImportedModel, SelectedModel, model_visual_center, selected_world_bounds},
     tool::ActiveTool,
 };
@@ -39,6 +40,7 @@ pub(super) fn spawn_drawing_overlays(
     spawn_rotation_angle_label(commands);
     spawn_scale_handle_visuals(commands, meshes, materials);
     spawn_cut_preview_plane_visual(commands, meshes, materials);
+    spawn_bottom_face_hover_visual(commands, meshes, materials);
 }
 
 fn spawn_scale_handle_visuals(
@@ -90,6 +92,7 @@ pub(super) fn draw_grid_and_selection(
     selected: Res<SelectedModel>,
     active_tool: Res<ActiveTool>,
     cut_preview: Res<CutPreview>,
+    bottom_face_hover: Res<BottomFaceHover>,
     gizmo_drag: Res<GizmoDrag>,
     rotate_hover: Res<RotateGizmoHover>,
     models: Query<(&ImportedModel, &Transform)>,
@@ -107,6 +110,7 @@ pub(super) fn draw_grid_and_selection(
 ) {
     draw_ground_grid(&mut gizmos);
     draw_cut_preview(&mut gizmos, &cut_preview, &selected, &models);
+    draw_bottom_face_hover(&bottom_face_hover, &mut gizmos);
     update_scale_handle_visuals(
         &selected,
         &active_tool,
@@ -278,6 +282,7 @@ fn draw_selected_model_tools(
     let show_selection_bounds = !active_tool.is_move()
         && !active_tool.is_rotate()
         && !active_tool.is_scale()
+        && !active_tool.is_bottom_face()
         && cut_preview.active_plane().is_none();
 
     if show_selection_bounds && selected.len() > 1 {
